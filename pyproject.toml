@@ -1,0 +1,16 @@
+[project]
+name = "genecoli"
+version = "0.0.1"
+description = "Add your description here"
+readme = "README.md"
+requires-python = "==3.12.9"
+dependencies = [
+    "bigraph-schema",
+    "process-bigraph",
+    "vecoli",
+]
+
+[tool.uv.sources]
+vecoli = { path = "../vEcoli" }
+process-bigraph = { path = "../process-bigraph" }
+bigraph-schema = { path = "../bigraph-schema" }
