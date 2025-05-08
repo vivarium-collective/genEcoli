@@ -4,7 +4,6 @@ import copy
 
 from vivarium.core.process import Process as VivariumProcess, Step as VivariumStep
 from process_bigraph import Process as PbgProcess, Step as PbgStep
-from vivarium.core.types import State
 
 from genEcoli.schemas import collapse_defaults, get_config_schema, get_defaults_schema
 

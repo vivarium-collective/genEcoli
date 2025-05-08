@@ -13,5 +13,5 @@ dependencies = [
 
 [tool.uv.sources]
 vecoli = { path = "../vEcoli" }
-# process-bigraph = { path = "../process-bigraph" }
-# bigraph-schema = { path = "../bigraph-schema" }
+process-bigraph = { path = "../process-bigraph" }
+bigraph-schema = { path = "../bigraph-schema" }
