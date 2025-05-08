@@ -8,9 +8,10 @@ dependencies = [
     "bigraph-schema",
     "process-bigraph",
     "vecoli",
+    "vivarium-core>=1.6.5",
 ]
 
 [tool.uv.sources]
 vecoli = { path = "../vEcoli" }
-process-bigraph = { path = "../process-bigraph" }
-bigraph-schema = { path = "../bigraph-schema" }
+# process-bigraph = { path = "../process-bigraph" }
+# bigraph-schema = { path = "../bigraph-schema" }

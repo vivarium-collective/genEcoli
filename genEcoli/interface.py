@@ -160,6 +160,7 @@ class MigrateProcess(VivariumProcess, PbgProcess):
     
 
 def test_migrate_process():
+    # TODO: finish this
     class Test(MigrateProcess):
         defaults = {'k': 0.11}
 
@@ -180,11 +181,6 @@ def test_migrate_process():
             return {
                 'z': state['x']**state['y'] / timestep*2
             }
-    
-    proc = Test({})
-    results = proc.update(proc.initial_state(), 11)
-    print(results)
-    print(proc.inputs())
 
 
 
