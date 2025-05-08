@@ -8,6 +8,7 @@ dependencies = [
     "bigraph-schema",
     "process-bigraph",
     "vecoli",
+    "vivarium-core>=1.6.5",
 ]
 
 [tool.uv.sources]
