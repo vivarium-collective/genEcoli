@@ -11,6 +11,11 @@ dependencies = [
     "vivarium-core>=1.6.5",
 ]
 
+[tool.setuptools]
+packages = [
+    "genEcoli"
+]
+
 [tool.uv.sources]
 vecoli = { path = "../vEcoli" }
 process-bigraph = { path = "../process-bigraph" }
