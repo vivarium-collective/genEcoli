@@ -77,8 +77,8 @@ def construct_schema(modname: str):
     return schema
 
 
-def register(schema, core):
-    type_name = schema.get("_type")
+def register(schema, core, key: str | None = None):
+    type_name = key or schema.get("_type")
     type_definition = {type_name: schema}
 
     # default_val = schema.get("_default")

@@ -18,6 +18,7 @@ from ecoli.library.schema import (
     empty_dict_divider,
     bulk_numpy_updater,
 )
+from genEcoli.types.register import register
 
 
 TYPE_MODULES = ["unum", "unit", "bulk"]  # TODO: add more here
@@ -61,7 +62,7 @@ for modname in TYPE_MODULES:
                 except:
                     # schema.pop(key, None)
                     pass
-        ecoli_core.register(key, schema)
+            register(schema, ecoli_core)
 
 
 
