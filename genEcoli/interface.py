@@ -3,7 +3,7 @@ from abc import abstractmethod
 import copy
 
 from vivarium.core.process import Process as VivariumProcess, Step as VivariumStep
-from process_bigraph import Process as PbgProcess, Step as PbgStep
+from process_bigraph import Process as BigraphProcess, Step as BigraphStep
 
 from genEcoli.schemas import collapse_defaults, get_config_schema, get_defaults_schema
 
@@ -18,7 +18,7 @@ class Revert:
     pass 
 
 
-class Resolver(PbgStep):
+class Resolver(BigraphStep):
     """Takes PartitionedProcess updates and somehow emits 
     a single update that is a resolution of their demands.
 
@@ -27,7 +27,7 @@ class Resolver(PbgStep):
     pass
 
 
-class MigrateStep(VivariumStep, PbgStep):
+class OmniStep(VivariumStep, BigraphStep):
     """This class allows v1 steps to run as v2 steps"""
 
     config_schema = {} 
@@ -96,7 +96,7 @@ class MigrateStep(VivariumStep, PbgStep):
         return {}
 
 
-class MigrateProcess(VivariumProcess, PbgProcess):
+class OmniProcess(VivariumProcess, BigraphProcess):
     # This class allows v1 processes to run as v2 processes
     config_schema = {} 
     _ports = {
@@ -104,8 +104,22 @@ class MigrateProcess(VivariumProcess, PbgProcess):
         "outputs": []
     }
 
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
+    def __init__(self, config=None, parameters=None, core=None) -> None:
+        if core is None:
+            return
+
+        parameters = parameters or config
+        config = config or parameters
+
+        VivariumProcess.__init__(
+            self,
+            parameters=parameters)
+
+        BigraphProcess.__init__(
+            self,
+            config=config,
+            core=core)
+
         self._port_data = self.ports_schema()
         self.input_port_data = self._set_ports("input")
         self.output_port_data = self._set_ports("output")
@@ -156,31 +170,25 @@ class MigrateProcess(VivariumProcess, PbgProcess):
     
     def update(self, state, interval):
         return self.next_update(interval, state)
-    
-
-def test_migrate_process():
-    # TODO: finish this
-    class Test(MigrateProcess):
-        defaults = {'k': 0.11}
-
-        def __init__(self, config, core=None):
-            super().__init__(config)
-            self.input_ports = ['x', 'y']
-            self.output_ports = ['z']
-        
-        def ports_schema(self):
-            return {
-                'x': {'_default': 11.11},
-                'y': {'_default': 2.22},
-                'z': {'_default': 3}
-            }
-
-        def next_update(self, timestep, states):
-            state = states
-            return {
-                'z': state['x']**state['y'] / timestep*2
-            }
 
 
+def update_inheritance(cls, new_base):
+    # replace the base class with the new base
+    cls.__bases__ = (new_base,)
 
+    # store the existing init
+    init = cls.__init__
 
+    # wrap the existing init with an init that accepts arguments
+    # specific to process-bigraph
+    def new_init(self, config=None, parameters=None, core=None):
+        parameters = parameters or config
+        init(self, parameters=parameters)
+        new_base.__init__(
+            self,
+            config,
+            parameters,
+            core)
+
+    # replace the existing init with the new init
+    cls.__init__ = new_init
