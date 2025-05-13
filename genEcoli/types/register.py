@@ -77,7 +77,7 @@ def construct_schema(modname: str):
     return schema
 
 
-def register(schema, core, key: str | None = None):
+def register(core, schema, key: str | None = None):
     type_name = key or schema.get("_type")
     type_definition = {type_name: schema}
 
@@ -87,9 +87,9 @@ def register(schema, core, key: str | None = None):
     return core.register_types(type_definition)
 
 
-def register_type(module_name: str, core, export: bool = True):
+def register_type(core, module_name: str, export: bool = True):
     schema = construct_schema(module_name)
-    register(schema, core)
+    register(core, schema)
 
     def_path = os.path.join(
         os.path.dirname(__file__),
@@ -105,5 +105,5 @@ def register_type(module_name: str, core, export: bool = True):
 
 def test_register_type(ecore):
     modname = "unum"
-    register_type(modname, ecore)
+    register_type(ecore, modname)
     assert ecore.types().get('unum') is not None

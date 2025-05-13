@@ -18,7 +18,9 @@ from ecoli.library.schema import (
     empty_dict_divider,
     bulk_numpy_updater,
 )
+
 from genEcoli.types.register import register
+from genEcoli.interface import OmniStep, OmniProcess, update_inheritance
 
 
 TYPE_MODULES = ["unum", "unit", "bulk"]  # TODO: add more here
@@ -41,28 +43,26 @@ def get_bulk_counts(bulk: np.ndarray) -> np.ndarray:
     return np.ascontiguousarray(bulk["count"])
 
 
-ecoli_core = ProcessTypes()
-ecoli_core.register_processes(TOY_PROCESSES)
+def register_types(core):
+    core.register_processes(TOY_PROCESSES)
 
+    # import and register types
+    possible_schema_keys = required_schema_keys | {"_divide", "_description", "_value"}
+    for modname in TYPE_MODULES:
+        ecoli_root = os.path.abspath(
+            os.path.dirname(__file__)
+        )
+        schema_fp = os.path.join(ecoli_root, 'types', 'definitions', f'{modname}.json')
+        with open(schema_fp, 'r') as f:
+            schema = json.load(f)
+            for key in schema:
+                if key in possible_schema_keys:
+                    try:
+                        val = schema[key]
+                        schema[key] = eval(val)
+                    except:
+                        # schema.pop(key, None)
+                        pass
+                register(core, schema)
 
-# import and register types
-possible_schema_keys = required_schema_keys | {"_divide", "_description", "_value"}
-for modname in TYPE_MODULES:
-    ecoli_root = os.path.abspath(
-        os.path.dirname(__file__)
-    )
-    schema_fp = os.path.join(ecoli_root, 'types', 'definitions', f'{modname}.json')
-    with open(schema_fp, 'r') as f:
-        schema = json.load(f)
-        for key in schema:
-            if key in possible_schema_keys:
-                try:
-                    val = schema[key]
-                    schema[key] = eval(val)
-                except:
-                    # schema.pop(key, None)
-                    pass
-            register(schema, ecoli_core)
-
-
-
+    return core
