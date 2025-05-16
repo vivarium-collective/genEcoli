@@ -1,7 +1,12 @@
 from vivarium.core.process import Process as VivariumProcess, Step as VivariumStep
+
+from bigraph_schema import default
 from process_bigraph import Composite, Process as BigraphProcess, Step as BigraphStep, ProcessTypes
 
-from genEcoli import update_inheritance, register_types, OmniStep, OmniProcess
+from ecoli.composites.ecoli_master import run_ecoli
+from ecoli.experiments.ecoli_master_sim import EcoliSim, CONFIG_DIR_PATH
+
+from genEcoli import update_inheritance, register_types, scan_processes, update_processes, OmniStep, OmniProcess
 
 
 class TestStep(VivariumStep):
@@ -17,9 +22,6 @@ class TestProcess(VivariumProcess):
     def __init__(self, parameters=None):
         super().__init__(parameters)
 
-        # self.input_ports = ['x', 'y']
-        # self.output_ports = ['z']
-        
 
     def ports_schema(self):
         return {
@@ -30,10 +32,34 @@ class TestProcess(VivariumProcess):
 
 
     def next_update(self, timestep, states):
-        state = states
         return {
-            'z': state['x']**state['y'] / timestep*2
+            'z': states['x']**states['y'] / timestep*2
         }
+
+
+class TestBigraph(BigraphProcess):
+    config_schema = {
+        'k': default('float', 0.11)}
+
+
+    def initialize(self, config):
+        pass
+
+
+    def inputs(self):
+        return {
+            'x': default('float', 11.11),
+            'y': default('float', 2.22)}
+
+
+    def outputs(self):
+        return {
+            'z': default('float', 3)}
+
+
+    def update(self, state, interval):
+        return {
+            'z': state['x']**state['y'] / interval*2}
 
 
 def test_migrate_process(core):
@@ -53,18 +79,68 @@ def test_migrate_process(core):
     omni = Composite({
         'state': state}, core=core)
 
-    assert omni.state['a'] == 11.11
+    import ipdb; ipdb.set_trace()
+
+    # assert omni.state['a'] == 11.11
 
 
-if __name__ == '__main__':
+def test_scan_processes(core):
+    processes = scan_processes('ecoli.processes')
+    core = update_processes(
+        core,
+        processes)
+
+    assert processes['processes'] and processes['steps']
+
+    return core
+
+
+def test_run_ecoli(core):
+    # timeseries = run_ecoli()
+
+    core = test_scan_processes(core)
+
+    filename = 'default'
+    sim = EcoliSim.from_file(CONFIG_DIR_PATH + filename + ".json")
+    sim.build_ecoli()
+
+    import ipdb; ipdb.set_trace()
+
+    processes = migrate_composite(sim)
+
+    core.register_processes(
+        processes)
+
+    import ipdb; ipdb.set_trace()
+
+
+def initialize_tests():
     core = ProcessTypes()
     core = register_types(core)
 
     update_inheritance(TestStep, OmniStep)
     update_inheritance(TestProcess, OmniProcess)
 
+    # config_schema, inputs, outputs = lookup_schemas(TestProcess)
+
+    # # TODO: do we need this?
+    # update_inheritance(
+    #     PBPBinding,
+    #     OmniStep,
+    #     config_schema={...?},
+    #     inputs={...?},
+    #     outputs={...?})
+
     core.register_processes({
         'test-step': TestStep,
         'test-process': TestProcess})
 
+    return core
+
+if __name__ == '__main__':
+    core = initialize_tests()
+
     test_migrate_process(core)
+    test_scan_processes(core)
+    test_run_ecoli(core)
+    

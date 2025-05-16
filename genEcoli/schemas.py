@@ -258,6 +258,8 @@ def get_schema_type(value: Any) -> str:
         _type = PORTS_MAPPER.get(str(value.dtype), 'any')
         formatted_shape = str(shape).replace(",", "|")
         return SchemaType(f"array[({formatted_shape}),{_type}]").id
+    elif value == {}:
+        return 'any'
     else:
         return SchemaType(PORTS_MAPPER.get(type_name, 'any')).id
 

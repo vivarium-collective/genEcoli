@@ -20,7 +20,7 @@ from ecoli.library.schema import (
 )
 
 from genEcoli.types.register import register
-from genEcoli.interface import OmniStep, OmniProcess, update_inheritance
+from genEcoli.interface import OmniStep, OmniProcess, update_inheritance, scan_processes, update_processes
 
 
 TYPE_MODULES = ["unum", "unit", "bulk"]  # TODO: add more here

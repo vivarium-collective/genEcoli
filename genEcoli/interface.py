@@ -1,16 +1,17 @@
-
 from abc import abstractmethod
 import copy
 
 from vivarium.core.process import Process as VivariumProcess, Step as VivariumStep
+
+from bigraph_schema.protocols import local_lookup_module
 from process_bigraph import Process as BigraphProcess, Step as BigraphStep
 
 from genEcoli.schemas import collapse_defaults, get_config_schema, get_defaults_schema
 
 
 __all__ = [
-    'MigrateStep',
-    'MigrateProcess',
+    'OmniStep',
+    'OmniProcess',
     'Resolver'
 ]
 
@@ -27,7 +28,8 @@ class Resolver(BigraphStep):
     pass
 
 
-class OmniStep(VivariumStep, BigraphStep):
+# class OmniStep(VivariumStep, BigraphStep):
+class OmniStep(BigraphStep):
     """This class allows v1 steps to run as v2 steps"""
 
     config_schema = {} 
@@ -36,8 +38,8 @@ class OmniStep(VivariumStep, BigraphStep):
         "outputs": []
     }
 
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
+    def __init__(self, config=None, parameters=None, core=None) -> None:
+        super().__init__(config=config, core=core)
         self._port_data = self.ports_schema()
         self.input_port_data = self._set_ports("input")
         self.output_port_data = self._set_ports("output")
@@ -96,7 +98,8 @@ class OmniStep(VivariumStep, BigraphStep):
         return {}
 
 
-class OmniProcess(VivariumProcess, BigraphProcess):
+# class OmniProcess(VivariumProcess, BigraphProcess):
+class OmniProcess(BigraphProcess):
     # This class allows v1 processes to run as v2 processes
     config_schema = {} 
     _ports = {
@@ -108,15 +111,17 @@ class OmniProcess(VivariumProcess, BigraphProcess):
         if core is None:
             return
 
+        import ipdb; ipdb.set_trace()
+
         parameters = parameters or config
         config = config or parameters
 
-        VivariumProcess.__init__(
-            self,
-            parameters=parameters)
+        # VivariumProcess.__init__(
+        #     self,
+        #     parameters=parameters)
 
-        BigraphProcess.__init__(
-            self,
+        super().__init__(
+            # self,
             config=config,
             core=core)
 
@@ -173,8 +178,11 @@ class OmniProcess(VivariumProcess, BigraphProcess):
 
 
 def update_inheritance(cls, new_base):
+    if new_base in cls.__bases__:
+        return
+
     # replace the base class with the new base
-    cls.__bases__ = (new_base,)
+    cls.__bases__ = cls.__bases__ + (new_base,)
 
     # store the existing init
     init = cls.__init__
@@ -184,11 +192,51 @@ def update_inheritance(cls, new_base):
     def new_init(self, config=None, parameters=None, core=None):
         parameters = parameters or config
         init(self, parameters=parameters)
-        new_base.__init__(
-            self,
-            config,
-            parameters,
-            core)
+
+        if core:
+            new_base.__init__(
+                self,
+                config,
+                parameters,
+                core)
 
     # replace the existing init with the new init
     cls.__init__ = new_init
+
+
+def scan_processes(path):
+    module = local_lookup_module(path)
+
+    processes = {}
+    steps = {}
+
+    for key, value in module.__dict__.items():
+        if isinstance(value, type) and issubclass(value, VivariumStep):
+            steps[key] = value
+        elif isinstance(value, type) and issubclass(value, VivariumProcess):
+            processes[key] = value
+
+    scan = {
+        'processes': processes,
+        'steps': steps}
+
+    return scan
+
+
+def update_processes(core, processes):
+    for process_name, process in processes.get('processes', {}).items():
+        update_inheritance(process, OmniProcess)
+        core.register_process(process_name, process)
+
+    for step_name, step in processes.get('steps', {}).items():
+        update_inheritance(step, OmniStep)
+        core.register_process(step_name, step)
+
+    return core
+
+
+def migrate_composite(sim):
+    
+
+
+    import ipdb; ipdb.set_trace()
