@@ -266,12 +266,13 @@ def get_schema_type(value: Any) -> str:
 
 MISSING_TYPES = {}
 
-def translate_vivarium_types(defaults: dict, name='UNKNOWN', path=()) -> dict:
+
+def infer_schema(config: dict, name='UNKNOWN', path=()) -> dict:
     """Translate default values into corresponding bigraph-schema type declarations."""
     ports = {}
-    for key, value in defaults.items():
+    for key, value in config.items():
         if isinstance(value, dict):
-            ports[key] = translate_vivarium_types(
+            ports[key] = infer_schema(
                 value,
                 name=name,
                 path=path+(key,))
@@ -289,10 +290,10 @@ def translate_vivarium_types(defaults: dict, name='UNKNOWN', path=()) -> dict:
     return ports
 
 
-def get_port_mapping(ports_schema: dict[str, Any]):
+def translate_ports(ports_schema: dict[str, Any]):
     """Translates vivarium.core.Process.defaults into bigraph-schema types to be consumed by pbg.Composite."""
     defaults = find_defaults(ports_schema)
-    types_found = translate_vivarium_types(defaults)
+    types_found = infer_schema(defaults)
     return types_found
 
 

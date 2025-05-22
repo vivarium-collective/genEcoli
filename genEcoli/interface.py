@@ -6,9 +6,9 @@ from vivarium.core.process import Process as VivariumProcess, Step as VivariumSt
 
 from bigraph_schema import deep_merge, Edge as BigraphEdge
 from bigraph_schema.protocols import local_lookup_module
-from process_bigraph import Process as BigraphProcess, Step as BigraphStep
+from process_bigraph import ProcessTypes, Process as BigraphProcess, Step as BigraphStep
 
-from genEcoli.schemas import collapse_defaults, get_config_schema, get_defaults_schema, translate_vivarium_types
+from genEcoli.schemas import collapse_defaults, get_config_schema, get_defaults_schema, infer_schema, translate_ports
 
 
 __all__ = [
@@ -19,6 +19,10 @@ __all__ = [
 
 class Revert:
     pass 
+
+
+# declare a global core
+ECOLI_CORE = ProcessTypes()
 
 
 class Resolver(BigraphStep):
@@ -41,10 +45,21 @@ class OmniStep(BigraphStep):
     }
 
     def __init__(self, config=None, parameters=None, core=None) -> None:
-        super().__init__(config=config, core=core)
-        self._port_data = self.ports_schema()
-        self.input_port_data = self._set_ports("input")
-        self.output_port_data = self._set_ports("output")
+        parameters = parameters or config
+        config = config or parameters
+        core = core or ECOLI_CORE
+
+        # VivariumProcess.__init__(
+        #     self,
+        #     parameters=parameters)
+
+        super().__init__(
+            config=config,
+            core=core)
+
+        # self._port_data = self.ports_schema()
+        # self.input_port_data = self._set_ports("input")
+        # self.output_port_data = self._set_ports("output")
 
     # def __init_subclass__(cls, **kwargs): 
     #     cls.config_schema = {
@@ -52,45 +67,49 @@ class OmniStep(BigraphStep):
     #         "time_step": {"_default": 1.0, "_type": "float"}
     #     }
     
-    def _set_ports(self, port_type: str):
-        """Separates inputs from outputs and defines defaults. If there are no port_names in either input_ports or output ports, then 
-        assume bidirectional.
-        """
-        port_type_name = f"{port_type}_ports"
-        port_names = getattr(self, port_type_name)
-        ports = copy.deepcopy(self._port_data[port_names])
-        if len(port_names):
-            ports = {
-                port: self._port_data[port]
-                for port in port_names
-            }
-        return ports
+    # def _set_ports(self, port_type: str):
+    #     """Separates inputs from outputs and defines defaults. If there are no port_names in either input_ports or output ports, then 
+    #     assume bidirectional.
+    #     """
+    #     port_type_name = f"{port_type}_ports"
+    #     port_names = getattr(self, port_type_name)
+    #     ports = copy.deepcopy(self._port_data[port_names])
+    #     if len(port_names):
+    #         ports = {
+    #             port: self._port_data[port]
+    #             for port in port_names
+    #         }
+    #     return ports
 
-    @property 
-    def input_ports(self):
-        return self._ports["inputs"]
+    # @property 
+    # def input_ports(self):
+    #     return self._ports["inputs"]
     
-    @input_ports.setter
-    def input_ports(self, v):
-        self._ports["inputs"] = v
+    # @input_ports.setter
+    # def input_ports(self, v):
+    #     self._ports["inputs"] = v
     
-    @property 
-    def output_ports(self):
-        return self._ports["outputs"]
+    # @property 
+    # def output_ports(self):
+    #     return self._ports["outputs"]
     
-    @output_ports.setter
-    def output_ports(self, v):
-        self._ports["outputs"] = v
+    # @output_ports.setter
+    # def output_ports(self, v):
+    #     self._ports["outputs"] = v
     
     def inputs(self):
         """Expects:
         self.input_port_data = {port_name: {_default: ...}}
         """
-        return get_defaults_schema(self.input_port_data)
+        return translate_ports(
+            self.ports_schema())
+        # return get_defaults_schema(self.input_port_data)
 
     def outputs(self):
         """Use specific ports if defined, otherwise return bidirectional ports"""
-        return get_defaults_schema(self.output_port_data)
+        return translate_ports(
+            self.ports_schema())
+        # return get_defaults_schema(self.output_port_data)
     
     def initial_state(self):
         return collapse_defaults(self.input_port_data)
@@ -110,24 +129,21 @@ class OmniProcess(BigraphProcess):
     }
 
     def __init__(self, config=None, parameters=None, core=None) -> None:
-        if core is None:
-            return
-
         parameters = parameters or config
         config = config or parameters
+        core = core or ECOLI_CORE
 
         # VivariumProcess.__init__(
         #     self,
         #     parameters=parameters)
 
         super().__init__(
-            # self,
             config=config,
             core=core)
 
-        self._port_data = self.ports_schema()
-        self.input_port_data = self._set_ports("input")
-        self.output_port_data = self._set_ports("output")
+        # self._port_data = self.ports_schema()
+        # self.input_port_data = self._set_ports("input")
+        # self.output_port_data = self._set_ports("output")
 
     # def __init_subclass__(cls, **kwargs): 
     #     cls.config_schema = {
@@ -135,40 +151,43 @@ class OmniProcess(BigraphProcess):
     #         "time_step": {"_default": 1.0, "_type": "float"}
     #     }
     
-    def _set_ports(self, port_type: str):
-        """Separates inputs from outputs and defines defaults"""
-        port_names = getattr(self, f"{port_type}_ports")
-        ports = copy.deepcopy(self._port_data)
-        if len(port_names):
-            ports = {
-                port: self._port_data[port]
-                for port in port_names
-            }
-        return ports
+    # def _set_ports(self, port_type: str):
+    #     """Separates inputs from outputs and defines defaults"""
+    #     port_names = getattr(self, f"{port_type}_ports")
+    #     ports = copy.deepcopy(self._port_data)
+    #     if len(port_names):
+    #         ports = {
+    #             port: self._port_data[port]
+    #             for port in port_names
+    #         }
+    #     return ports
 
-    @property 
-    def input_ports(self):
-        return self._ports["inputs"]
+    # @property 
+    # def input_ports(self):
+    #     return self._ports["inputs"]
     
-    @input_ports.setter
-    def input_ports(self, v):
-        self._ports["inputs"] = v
+    # @input_ports.setter
+    # def input_ports(self, v):
+    #     self._ports["inputs"] = v
     
-    @property 
-    def output_ports(self):
-        return self._ports["outputs"]
+    # @property 
+    # def output_ports(self):
+    #     return self._ports["outputs"]
     
-    @output_ports.setter
-    def output_ports(self, v):
-        self._ports["outputs"] = v
+    # @output_ports.setter
+    # def output_ports(self, v):
+    #     self._ports["outputs"] = v
     
     def inputs(self):
-        # extract from ports schema
-        return get_defaults_schema(self.input_port_data)
+        return translate_ports(
+            self.ports_schema())
+        # return get_defaults_schema(self.input_port_data)
 
     def outputs(self):
         """Use specific ports if defined, otherwise return bidirectional ports"""
-        return get_defaults_schema(self.output_port_data)
+        return translate_ports(
+            self.ports_schema())
+        # return get_defaults_schema(self.output_port_data)
     
     def initial_state(self):
         return collapse_defaults(self.input_port_data)
@@ -190,15 +209,17 @@ def update_inheritance(cls, new_base):
     # wrap the existing init with an init that accepts arguments
     # specific to process-bigraph
     def new_init(self, config=None, parameters=None, core=None):
+        config = config or parameters
         parameters = parameters or config
+        core = core or ECOLI_CORE
+
         init(self, parameters=parameters)
 
-        if core:
-            new_base.__init__(
-                self,
-                config,
-                parameters,
-                core)
+        new_base.__init__(
+            self,
+            config,
+            parameters,
+            core)
 
     # replace the existing init with the new init
     cls.__init__ = new_init
@@ -265,7 +286,7 @@ def translate_processes(tree, topology):
         config = tree.parameters
 
         if not hasattr(type(tree), 'config_schema') or not type(tree).config_schema:
-            type(tree).config_schema = translate_vivarium_types(
+            type(tree).config_schema = infer_schema(
                 config,
                 name=process_name)
 

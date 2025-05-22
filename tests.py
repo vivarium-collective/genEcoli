@@ -7,6 +7,8 @@ from ecoli.composites.ecoli_master import run_ecoli
 from ecoli.experiments.ecoli_master_sim import EcoliSim, CONFIG_DIR_PATH
 
 from genEcoli import update_inheritance, register_types, scan_processes, update_processes, infer_state_from_composer, migrate_composite, OmniStep, OmniProcess
+from genEcoli.schemas import MISSING_TYPES
+from genEcoli.interface import ECOLI_CORE
 
 
 class TestStep(VivariumStep):
@@ -113,7 +115,7 @@ def test_run_ecoli(core):
 
 
 def initialize_tests():
-    core = ProcessTypes()
+    core = ECOLI_CORE
     core = register_types(core)
 
     update_inheritance(TestStep, OmniStep)
@@ -134,6 +136,7 @@ def initialize_tests():
         'test-process': TestProcess})
 
     return core
+
 
 if __name__ == '__main__':
     core = initialize_tests()
