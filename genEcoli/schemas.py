@@ -264,16 +264,27 @@ def get_schema_type(value: Any) -> str:
         return SchemaType(PORTS_MAPPER.get(type_name, 'any')).id
 
 
-def translate_vivarium_types(defaults: dict) -> dict:
+MISSING_TYPES = {}
+
+def translate_vivarium_types(defaults: dict, name='UNKNOWN', path=()) -> dict:
     """Translate default values into corresponding bigraph-schema type declarations."""
     ports = {}
     for key, value in defaults.items():
         if isinstance(value, dict):
-            ports[key] = translate_vivarium_types(value)
+            ports[key] = translate_vivarium_types(
+                value,
+                name=name,
+                path=path+(key,))
+
         else:
             type_name = type(value).__name__
             # ports[key] = 'any'
-            ports[key] = PORTS_MAPPER[type_name]
+            if type_name in PORTS_MAPPER:
+                ports[key] = PORTS_MAPPER[type_name]
+            else:
+                if type_name not in MISSING_TYPES:
+                    MISSING_TYPES[type_name] = set([])
+                MISSING_TYPES[type_name].add((name,)+path+(key,))
 
     return ports
 
@@ -281,7 +292,8 @@ def translate_vivarium_types(defaults: dict) -> dict:
 def get_port_mapping(ports_schema: dict[str, Any]):
     """Translates vivarium.core.Process.defaults into bigraph-schema types to be consumed by pbg.Composite."""
     defaults = find_defaults(ports_schema)
-    return translate_vivarium_types(defaults)
+    types_found = translate_vivarium_types(defaults)
+    return types_found
 
 
 def get_config_schema(defaults: dict[str, Any]):

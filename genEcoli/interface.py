@@ -1,12 +1,14 @@
 from abc import abstractmethod
+import inspect
 import copy
 
 from vivarium.core.process import Process as VivariumProcess, Step as VivariumStep
 
+from bigraph_schema import deep_merge, Edge as BigraphEdge
 from bigraph_schema.protocols import local_lookup_module
 from process_bigraph import Process as BigraphProcess, Step as BigraphStep
 
-from genEcoli.schemas import collapse_defaults, get_config_schema, get_defaults_schema
+from genEcoli.schemas import collapse_defaults, get_config_schema, get_defaults_schema, translate_vivarium_types
 
 
 __all__ = [
@@ -44,11 +46,11 @@ class OmniStep(BigraphStep):
         self.input_port_data = self._set_ports("input")
         self.output_port_data = self._set_ports("output")
 
-    def __init_subclass__(cls, **kwargs): 
-        cls.config_schema = {
-            **get_config_schema(cls.defaults),
-            "time_step": {"_default": 1.0, "_type": "float"}
-        }
+    # def __init_subclass__(cls, **kwargs): 
+    #     cls.config_schema = {
+    #         **get_config_schema(cls.defaults),
+    #         "time_step": {"_default": 1.0, "_type": "float"}
+    #     }
     
     def _set_ports(self, port_type: str):
         """Separates inputs from outputs and defines defaults. If there are no port_names in either input_ports or output ports, then 
@@ -111,8 +113,6 @@ class OmniProcess(BigraphProcess):
         if core is None:
             return
 
-        import ipdb; ipdb.set_trace()
-
         parameters = parameters or config
         config = config or parameters
 
@@ -129,11 +129,11 @@ class OmniProcess(BigraphProcess):
         self.input_port_data = self._set_ports("input")
         self.output_port_data = self._set_ports("output")
 
-    def __init_subclass__(cls, **kwargs): 
-        cls.config_schema = {
-            **get_config_schema(cls.defaults),
-            "time_step": {"_default": 1.0, "_type": "float"}
-        }
+    # def __init_subclass__(cls, **kwargs): 
+    #     cls.config_schema = {
+    #         **get_config_schema(cls.defaults),
+    #         "time_step": {"_default": 1.0, "_type": "float"}
+    #     }
     
     def _set_ports(self, port_type: str):
         """Separates inputs from outputs and defines defaults"""
@@ -204,18 +204,32 @@ def update_inheritance(cls, new_base):
     cls.__init__ = new_init
 
 
+def find_instances(module, visited=None):
+    steps = {}
+    processes = {}
+    visited = visited or set([])
+
+    for key in dir(module):
+        value = getattr(module, key)
+        if isinstance(value, type) and issubclass(value, VivariumStep) and not value == VivariumStep:
+            steps[key] = value
+        elif isinstance(value, type) and issubclass(value, VivariumProcess) and not value == VivariumProcess:
+            processes[key] = value
+        elif inspect.ismodule(value) and value.__name__.startswith('ecoli') and value not in visited:
+            visited.add(value)
+            substeps, subprocesses = find_instances(
+                value,
+                visited)
+
+            steps.update(substeps)
+            processes.update(subprocesses)
+
+    return steps, processes
+
+
 def scan_processes(path):
     module = local_lookup_module(path)
-
-    processes = {}
-    steps = {}
-
-    for key, value in module.__dict__.items():
-        if isinstance(value, type) and issubclass(value, VivariumStep):
-            steps[key] = value
-        elif isinstance(value, type) and issubclass(value, VivariumProcess):
-            processes[key] = value
-
+    steps, processes = find_instances(module)
     scan = {
         'processes': processes,
         'steps': steps}
@@ -235,8 +249,67 @@ def update_processes(core, processes):
     return core
 
 
+def list_paths(path):
+    if isinstance(path, tuple):
+        return list(path)
+    elif isinstance(path, dict):
+        result = {}
+        for key, subpath in path.items():
+            result[key] = list_paths(subpath)
+        return result
+
+
+def translate_processes(tree, topology):
+    if isinstance(tree, BigraphEdge):
+        process_name = tree.name
+        config = tree.parameters
+
+        if not hasattr(type(tree), 'config_schema') or not type(tree).config_schema:
+            type(tree).config_schema = translate_vivarium_types(
+                config,
+                name=process_name)
+
+        type_name = 'step'
+        state = {}
+        if isinstance(tree, BigraphProcess):
+            type_name = 'process'
+            state['interval'] = 1.0
+
+        wires = list_paths(topology)
+
+        state.update({
+            '_type': type_name,
+            'address': f'local:{process_name}',
+            'config': config,
+            'inputs': wires,
+            'outputs': wires,
+            'instance': tree})
+
+        return state
+
+    elif isinstance(tree, dict):
+        result = {}
+        for key, subtree in tree.items():
+            result[key] = translate_processes(
+                subtree,
+                topology[key])
+
+        return result
+
+    else:
+        import ipdb; ipdb.set_trace()
+
+
 def migrate_composite(sim):
-    
+    processes = translate_processes(
+        sim.ecoli.processes,
+        sim.ecoli.topology)
 
+    steps = translate_processes(
+        sim.ecoli.steps,
+        sim.ecoli.topology)
 
-    import ipdb; ipdb.set_trace()
+    deep_merge(processes, steps)
+
+    return {
+        'state': processes}

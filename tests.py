@@ -6,7 +6,7 @@ from process_bigraph import Composite, Process as BigraphProcess, Step as Bigrap
 from ecoli.composites.ecoli_master import run_ecoli
 from ecoli.experiments.ecoli_master_sim import EcoliSim, CONFIG_DIR_PATH
 
-from genEcoli import update_inheritance, register_types, scan_processes, update_processes, OmniStep, OmniProcess
+from genEcoli import update_inheritance, register_types, scan_processes, update_processes, infer_state_from_composer, migrate_composite, OmniStep, OmniProcess
 
 
 class TestStep(VivariumStep):
@@ -97,19 +97,17 @@ def test_scan_processes(core):
 
 def test_run_ecoli(core):
     # timeseries = run_ecoli()
-
     core = test_scan_processes(core)
 
     filename = 'default'
     sim = EcoliSim.from_file(CONFIG_DIR_PATH + filename + ".json")
     sim.build_ecoli()
 
+    document = migrate_composite(sim)
+
     import ipdb; ipdb.set_trace()
 
-    processes = migrate_composite(sim)
-
-    core.register_processes(
-        processes)
+    ecoli = Composite(document, core=core)
 
     import ipdb; ipdb.set_trace()
 
