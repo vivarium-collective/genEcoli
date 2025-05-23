@@ -44,72 +44,28 @@ class OmniStep(BigraphStep):
         "outputs": []
     }
 
-    def __init__(self, config=None, parameters=None, core=None) -> None:
+    def __init__(self, parameters=None, config=None, core=None) -> None:
         parameters = parameters or config
         config = config or parameters
         core = core or ECOLI_CORE
-
-        # VivariumProcess.__init__(
-        #     self,
-        #     parameters=parameters)
 
         super().__init__(
             config=config,
             core=core)
 
-        # self._port_data = self.ports_schema()
-        # self.input_port_data = self._set_ports("input")
-        # self.output_port_data = self._set_ports("output")
-
-    # def __init_subclass__(cls, **kwargs): 
-    #     cls.config_schema = {
-    #         **get_config_schema(cls.defaults),
-    #         "time_step": {"_default": 1.0, "_type": "float"}
-    #     }
-    
-    # def _set_ports(self, port_type: str):
-    #     """Separates inputs from outputs and defines defaults. If there are no port_names in either input_ports or output ports, then 
-    #     assume bidirectional.
-    #     """
-    #     port_type_name = f"{port_type}_ports"
-    #     port_names = getattr(self, port_type_name)
-    #     ports = copy.deepcopy(self._port_data[port_names])
-    #     if len(port_names):
-    #         ports = {
-    #             port: self._port_data[port]
-    #             for port in port_names
-    #         }
-    #     return ports
-
-    # @property 
-    # def input_ports(self):
-    #     return self._ports["inputs"]
-    
-    # @input_ports.setter
-    # def input_ports(self, v):
-    #     self._ports["inputs"] = v
-    
-    # @property 
-    # def output_ports(self):
-    #     return self._ports["outputs"]
-    
-    # @output_ports.setter
-    # def output_ports(self, v):
-    #     self._ports["outputs"] = v
-    
     def inputs(self):
         """Expects:
         self.input_port_data = {port_name: {_default: ...}}
         """
         return translate_ports(
-            self.ports_schema())
-        # return get_defaults_schema(self.input_port_data)
+            self.ports_schema(),
+            name=self.name)
 
     def outputs(self):
         """Use specific ports if defined, otherwise return bidirectional ports"""
         return translate_ports(
-            self.ports_schema())
-        # return get_defaults_schema(self.output_port_data)
+            self.ports_schema(),
+            name=self.name)
     
     def initial_state(self):
         return collapse_defaults(self.input_port_data)
@@ -119,75 +75,33 @@ class OmniStep(BigraphStep):
         return {}
 
 
-# class OmniProcess(VivariumProcess, BigraphProcess):
 class OmniProcess(BigraphProcess):
     # This class allows v1 processes to run as v2 processes
-    config_schema = {} 
+    config_schema = {}
     _ports = {
         "inputs": [],
         "outputs": []
     }
 
-    def __init__(self, config=None, parameters=None, core=None) -> None:
+    def __init__(self, parameters=None, config=None, core=None) -> None:
         parameters = parameters or config
         config = config or parameters
         core = core or ECOLI_CORE
-
-        # VivariumProcess.__init__(
-        #     self,
-        #     parameters=parameters)
 
         super().__init__(
             config=config,
             core=core)
 
-        # self._port_data = self.ports_schema()
-        # self.input_port_data = self._set_ports("input")
-        # self.output_port_data = self._set_ports("output")
-
-    # def __init_subclass__(cls, **kwargs): 
-    #     cls.config_schema = {
-    #         **get_config_schema(cls.defaults),
-    #         "time_step": {"_default": 1.0, "_type": "float"}
-    #     }
-    
-    # def _set_ports(self, port_type: str):
-    #     """Separates inputs from outputs and defines defaults"""
-    #     port_names = getattr(self, f"{port_type}_ports")
-    #     ports = copy.deepcopy(self._port_data)
-    #     if len(port_names):
-    #         ports = {
-    #             port: self._port_data[port]
-    #             for port in port_names
-    #         }
-    #     return ports
-
-    # @property 
-    # def input_ports(self):
-    #     return self._ports["inputs"]
-    
-    # @input_ports.setter
-    # def input_ports(self, v):
-    #     self._ports["inputs"] = v
-    
-    # @property 
-    # def output_ports(self):
-    #     return self._ports["outputs"]
-    
-    # @output_ports.setter
-    # def output_ports(self, v):
-    #     self._ports["outputs"] = v
-    
     def inputs(self):
         return translate_ports(
-            self.ports_schema())
-        # return get_defaults_schema(self.input_port_data)
+            self.ports_schema(),
+            name=self.name)
 
     def outputs(self):
         """Use specific ports if defined, otherwise return bidirectional ports"""
         return translate_ports(
-            self.ports_schema())
-        # return get_defaults_schema(self.output_port_data)
+            self.ports_schema(),
+            name=self.name)
     
     def initial_state(self):
         return collapse_defaults(self.input_port_data)
@@ -288,7 +202,7 @@ def translate_processes(tree, topology):
         if not hasattr(type(tree), 'config_schema') or not type(tree).config_schema:
             type(tree).config_schema = infer_schema(
                 config,
-                name=process_name)
+                path=(process_name,))
 
         type_name = 'step'
         state = {}

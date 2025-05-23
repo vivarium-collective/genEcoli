@@ -99,17 +99,23 @@ def test_scan_processes(core):
 
 def test_run_ecoli(core):
     # timeseries = run_ecoli()
-    core = test_scan_processes(core)
-
     filename = 'default'
     sim = EcoliSim.from_file(CONFIG_DIR_PATH + filename + ".json")
     sim.build_ecoli()
 
+    import ipdb; ipdb.set_trace()
+
+    core = test_scan_processes(core)
     document = migrate_composite(sim)
 
     import ipdb; ipdb.set_trace()
 
     ecoli = Composite(document, core=core)
+
+    import ipdb; ipdb.set_trace()
+
+    ecoli.run(
+        10.0)
 
     import ipdb; ipdb.set_trace()
 
@@ -120,16 +126,6 @@ def initialize_tests():
 
     update_inheritance(TestStep, OmniStep)
     update_inheritance(TestProcess, OmniProcess)
-
-    # config_schema, inputs, outputs = lookup_schemas(TestProcess)
-
-    # # TODO: do we need this?
-    # update_inheritance(
-    #     PBPBinding,
-    #     OmniStep,
-    #     config_schema={...?},
-    #     inputs={...?},
-    #     outputs={...?})
 
     core.register_processes({
         'test-step': TestStep,
@@ -142,6 +138,5 @@ if __name__ == '__main__':
     core = initialize_tests()
 
     test_migrate_process(core)
-    test_scan_processes(core)
     test_run_ecoli(core)
     

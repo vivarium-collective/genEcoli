@@ -2,6 +2,8 @@ import copy
 import dataclasses
 from functools import wraps
 from typing import Dict, Any
+# from multipledispatch import dispatch
+from plum import dispatch
 
 import numpy as np
 import unum
@@ -10,48 +12,51 @@ from bigraph_schema import deep_merge
 from bigraph_schema.type_functions import deserialize_array
 
 
-DEFAULT_DICT_TYPE = "tree"
+NONETYPE = type(None)
+DEFAULT_DICT_TYPE = 'map'
 PORTS_MAPPER = {
-    "int": "integer",
-    "bool": "boolean",
-    "list": "list",
-    "tuple": "tuple",
-    "float": "float",
-    "ndarray": "list",  # TODO: eventually formalize this to "array",
-    "dict": DEFAULT_DICT_TYPE,
-    "NoneType": "any",  # TODO: be less general here (attempt further parsing if need be)
-    "int64": "integer",
-    "float32": "float",
-    "float64": "float",
-    "int32": "integer",
-    "int16": "integer",
-    "uint16": "integer",
-    "Unum": "unum",
-    "str": "string",
-    "Quantity": "unit"
+    'int': 'integer',
+    'bool': 'boolean',
+    'list': 'list',
+    'tuple': 'tuple',
+    'float': 'float',
+    'ndarray': 'array',
+    'dict': DEFAULT_DICT_TYPE,
+    'NoneType': 'any',
+    'set': 'list',
+    'int64': 'integer',
+    'float32': 'float',
+    'float64': 'float',
+    'int64': 'integer',
+    'int32': 'integer',
+    'int16': 'integer',
+    'uint16': 'integer',
+    'Unum': 'unum',
+    'str': 'string',
+    'Quantity': 'unit'
 }
 
 
 def not_a_process(value):
-    """Returns ``True`` if not a :py:class:`vivarium.core.process.Process` instance."""
+    '''Returns ``True`` if not a :py:class:`vivarium.core.process.Process` instance.'''
     # return not (isinstance(value, Store) and value.topology)
     pass
 
 
 def get_unique_fields(unique: np.ndarray) -> list[np.ndarray]:
-    """
+    '''
     Args:
         unique: Numpy structured array of attributes for one unique molecule
     Returns:
         List of contiguous (required by orjson) arrays, one for each attribute
-    """
+    '''
     return [np.ascontiguousarray(unique[field]) for field in unique.dtype.names]
 
 
 def get_defaults_schema(d):
-    """Returns a dict whose keys match that of d, except replacing innermost values (v) with their corresponding _default declarations.
+    '''Returns a dict whose keys match that of d, except replacing innermost values (v) with their corresponding _default declarations.
     Used for migration.
-    """
+    '''
     if isinstance(d, dict):
         extracted_attrs = ['_divider', '_type', '_default']
         is_inner = any([k in extracted_attrs for k in d])
@@ -70,7 +75,7 @@ def get_defaults_schema(d):
                 type_id = get_schema_type(value)
                 schema['_type'] = type_id
             
-            if len(schema.keys()) == 1 and "_type" in list(schema.keys()):
+            if len(schema.keys()) == 1 and '_type' in list(schema.keys()):
                 return schema['_type']
             else:
                 return schema
@@ -78,7 +83,7 @@ def get_defaults_schema(d):
         else:
             # and empty (return)
             if not len(d.keys()):
-                return "tree"
+                return 'tree'
             # or nested (recurse)
             else:
                 return {k: get_defaults_schema(v) for k, v in d.items()}
@@ -87,9 +92,9 @@ def get_defaults_schema(d):
     
 
 def collapse_defaults(d):
-    """Returns a dict whose keys match that of d, except replacing innermost values (v) with their corresponding _default declarations.
+    '''Returns a dict whose keys match that of d, except replacing innermost values (v) with their corresponding _default declarations.
     Used for migration.
-    """
+    '''
     if isinstance(d, dict):
         if '_default' in d:
             return d['_default'] 
@@ -100,12 +105,12 @@ def collapse_defaults(d):
 
 
 def flatten_state(state, parent_key='', sep='.'):
-    """Returns a flat dict in which the keys express port nesting via dot notation and the values being store values.
+    '''Returns a flat dict in which the keys express port nesting via dot notation and the values being store values.
     Used for migration.
-    """
+    '''
     items = {}
     for k, v in state.items():
-        new_key = f"{parent_key}{sep}{k}" if parent_key else k
+        new_key = f'{parent_key}{sep}{k}' if parent_key else k
         if isinstance(v, dict):
             items.update(flatten_state(v, new_key, sep=sep))
         else:
@@ -114,13 +119,13 @@ def flatten_state(state, parent_key='', sep='.'):
 
 
 def capture_arg(arg_to_capture: str):
-    """
+    '''
     Usage:
 
     @capture_arg('state')
     def update(self, state):
         # self._captured_state will be available here
-    """
+    '''
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -131,7 +136,7 @@ def capture_arg(arg_to_capture: str):
             all_args.update(kwargs)
 
             captured_value = all_args.get(arg_to_capture)
-            setattr(self_obj, f"_captured_{arg_to_capture}", captured_value)
+            setattr(self_obj, f'_captured_{arg_to_capture}', captured_value)
 
             return func(*args, **kwargs)
         return wrapper
@@ -139,11 +144,11 @@ def capture_arg(arg_to_capture: str):
 
 
 def dict_union(a: dict, b: dict, mutate_a: bool = False, secure: bool = False) -> dict:
-    """
+    '''
     Performs `bigraph_schema.deep_merge(a, b)` but returns a new object rather than mutating `a` if
     and only if `mutate_a = True`, otherwise performs a regular call to `deep_merge`. If `secure` is `True`,
     then both `a` and `b` will be explicitly deleted from memory, leaving only this return.
-    """
+    '''
     if not mutate_a:
         a = copy.deepcopy(a)
     c = deep_merge(a, b)
@@ -162,7 +167,7 @@ class SchemaType:
 
 
 def listener_schema(elements: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
-    """Helper function that can be used in ``inputs`` and ``outputs`` to create generic
+    '''Helper function that can be used in ``inputs`` and ``outputs`` to create generic
     schema for a collection of listeners.
 
     Args:
@@ -182,25 +187,25 @@ def listener_schema(elements: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
 
     Returns:
         Ports schemas for all listeners in ``elements``.
-    """
-    # basic_schema = {"_updater": "set", "_emit": True}
+    '''
+    # basic_schema = {'_updater': 'set', '_emit': True}
     schema = {}
     for element, default in elements.items():
         # Assume that tuples contain (default, metadata) in that order
         if isinstance(default, tuple):
             schema[element] = {
-                "_default": default[0],
-                "_type": str(get_schema_type(default[0]))
+                '_default': default[0],
+                '_type': str(get_schema_type(default[0]))
                 # **basic_schema,
-                # "_properties": {"metadata": default[1]},
+                # '_properties': {'metadata': default[1]},
             }
         else:
-            schema[element] = {"_default": default, "_type": str(get_schema_type(default))}  # **basic_schema, }
+            schema[element] = {'_default': default, '_type': str(get_schema_type(default))}  # **basic_schema, }
     return schema
 
 
 def numpy_schema(name: str, emit: bool = True) -> Dict[str, Any]:
-    """
+    '''
     Helper function used to define defaults that get parsed for inputs and outputs and initial states for bulk and unique molecules
 
     Args:
@@ -210,38 +215,38 @@ def numpy_schema(name: str, emit: bool = True) -> Dict[str, Any]:
 
     Returns:
         Fully configured and bigraph-schema-compliant ports schema for molecules of type `name`
-    """
+    '''
     from ecoli.shared.registry import ecoli_core
 
     registered_types = ecoli_core.types()
     if name in registered_types:
         type_schema = registered_types[name]
-        type_schema.pop("_type")
+        type_schema.pop('_type')
         return type_schema
     
     schema = {
-        "_default": np.empty((0,), dtype=tuple), 
-        "_serialize": get_unique_fields,
-        "_deserialize": deserialize_array,
-        "_divide": UNIQUE_DIVIDERS.get(name),
-        "_description": {
-            "emit": emit
+        '_default': np.empty((0,), dtype=tuple), 
+        '_serialize': get_unique_fields,
+        '_deserialize': deserialize_array,
+        '_divide': UNIQUE_DIVIDERS.get(name),
+        '_description': {
+            'emit': emit
         }
     }
     divider = UNIQUE_DIVIDERS.get(name)
     if divider is not None:
-        schema["_divide"] = divider
+        schema['_divide'] = divider
     return schema
 
 
 def find_defaults(params: dict) -> dict:
-    """Extract inner dict _default values from an arbitrarily-nested `params` input."""
+    '''Extract inner dict _default values from an arbitrarily-nested `params` input.'''
     result = {}
     for key, value in params.items():
         if isinstance(value, dict):
             nested_result = find_defaults(value)
-            if "_default" in value and not nested_result:
-                val = value["_default"]
+            if '_default' in value and not nested_result:
+                val = value['_default']
                 if isinstance(val, Quantity):
                     val = val.to_tuple()[0]
                 result[key] = val
@@ -256,49 +261,148 @@ def get_schema_type(value: Any) -> str:
     if isinstance(value, np.ndarray):
         shape = str(value.shape)
         _type = PORTS_MAPPER.get(str(value.dtype), 'any')
-        formatted_shape = str(shape).replace(",", "|")
-        return SchemaType(f"array[({formatted_shape}),{_type}]").id
+        formatted_shape = str(shape).replace(',', '|')
+        return SchemaType(f'array[({formatted_shape}),{_type}]').id
     elif value == {}:
         return 'any'
     else:
         return SchemaType(PORTS_MAPPER.get(type_name, 'any')).id
 
 
+def dtype_schema(dtype):
+    return PORTS_MAPPER.get(
+        str(dtype),
+        'float')
+
+
 MISSING_TYPES = {}
 
 
-def infer_schema(config: dict, name='UNKNOWN', path=()) -> dict:
-    """Translate default values into corresponding bigraph-schema type declarations."""
-    ports = {}
-    for key, value in config.items():
-        if isinstance(value, dict):
-            ports[key] = infer_schema(
-                value,
-                name=name,
-                path=path+(key,))
+@dispatch
+def infer(value: int, path: tuple):
+    return 'integer'
 
-        else:
-            type_name = type(value).__name__
-            # ports[key] = 'any'
-            if type_name in PORTS_MAPPER:
-                ports[key] = PORTS_MAPPER[type_name]
-            else:
-                if type_name not in MISSING_TYPES:
-                    MISSING_TYPES[type_name] = set([])
-                MISSING_TYPES[type_name].add((name,)+path+(key,))
+@dispatch
+def infer(value: bool, path: tuple):
+    return 'boolean'
+
+@dispatch
+def infer(value: float, path: tuple):
+    return 'float'
+
+@dispatch
+def infer(value: str, path: tuple):
+    return 'string'
+
+@dispatch
+def infer(value: np.ndarray, path: tuple):
+    shape = '|'.join([str(dimension) for dimension in value.shape])
+    data = infer(
+        dtype_schema(value.dtype),
+        path+('_data',))
+
+    return f'array[({shape}),{data}]'
+
+@dispatch
+def infer(value: list, path: tuple):
+    element = 'any'
+    if len(value) > 0:
+        element = infer(
+            value[0],
+            path+('_element',))
+
+    return f'list[{element}]'
+
+@dispatch
+def infer(value: tuple, path: tuple):
+    result = []
+    for index, item in enumerate(value):
+        key = f'_{index}'
+        schema = infer(
+            item,
+            path+(key,))
+        result.append(schema)
+
+    return tuple(
+        result)
+
+@dispatch
+def infer(value: NONETYPE, path: tuple):
+    return 'maybe[any]'
+
+@dispatch
+def infer(value: set, path: tuple):
+    return infer(
+        list(value),
+        path)
+
+def dict_schema(values):
+    return ','.join([
+        f'{key}:{value}'
+        for key, value in values.items()])
+
+@dispatch
+def infer(value: dict, path: tuple):
+    subvalues = {}
+    distinct_subvalues = []
+    for key, subvalue in value.items():
+        subvalues[key] = infer(
+            subvalue,
+            path+(key,))
+
+        if subvalues[key] not in distinct_subvalues:
+            distinct_subvalues.append(
+                subvalues[key])
+
+    if len(distinct_subvalues) == 1:
+        map_value = distinct_subvalues[0]
+        if isinstance(map_value, dict):
+            map_value = dict_schema(
+                map_value)
+
+        return f'map[{map_value}]'
+
+    else:
+        return subvalues
+
+@dispatch
+def infer(value: object, path: object):
+    type_name = str(type(value))
+    if type_name not in MISSING_TYPES:
+        MISSING_TYPES[type_name] = set([])
+
+    MISSING_TYPES[type_name].add(
+        path)
+
+    return 'any'
+
+
+def infer_schema(config, path=()) -> dict:
+    '''Translate default values into corresponding bigraph-schema type declarations.'''
+    ports = {}
+
+    for key, value in config.items():
+        ports[key] = infer(
+            value,
+            path+(key,))
 
     return ports
 
 
-def translate_ports(ports_schema: dict[str, Any]):
-    """Translates vivarium.core.Process.defaults into bigraph-schema types to be consumed by pbg.Composite."""
-    defaults = find_defaults(ports_schema)
-    types_found = infer_schema(defaults)
+def translate_ports(ports_schema, name='top'):
+    '''Translates vivarium.core.Process.defaults into bigraph-schema types to be consumed by pbg.Composite.'''
+    defaults = find_defaults(
+        ports_schema)
+
+    types_found = infer_schema(
+        defaults,
+        path=(name,))
+
     return types_found
 
 
 def get_config_schema(defaults: dict[str, Any]):
-    """Translates vivarium.core.Process.defaults into bigraph-schema types to be consumed by pbg.Composite."""
+    '''Translates vivarium.core.Process.defaults into bigraph-schema types to be consumed by pbg.Composite.'''
     config_schema = {}
     for k, v in defaults.copy().items():
         if not isinstance(v, dict):
@@ -316,16 +420,16 @@ def get_config_schema(defaults: dict[str, Any]):
                     v = v.asNumber()
 
                 config_schema[k] = {
-                    "_type": _type,  # TODO: provide a more specific lookup
-                    "_default": v
+                    '_type': _type,  # TODO: provide a more specific lookup
+                    '_default': v
                 }
         else:
-            if "_type" in v.keys():
+            if '_type' in v.keys():
                 # case: already has a bgs-compliant type def
                 config_schema[k] = v
             else:
                 # case: use type with default if default value assigned
-                config_schema[k] = DEFAULT_DICT_TYPE if not len(v.keys()) else {"_type": DEFAULT_DICT_TYPE, "_default": v}
+                config_schema[k] = DEFAULT_DICT_TYPE if not len(v.keys()) else {'_type': DEFAULT_DICT_TYPE, '_default': v}
 
     return config_schema
 
@@ -347,7 +451,7 @@ def export_vivarium_unit_schemas(types_dir: str | None = None):
         
     for item in dir(vivunits):
         v = getattr(vivunits, item)
-        if type(v).__name__.lower() == "unit":
+        if type(v).__name__.lower() == 'unit':
             atomic_unit = 1 * v
             type_name = str(atomic_unit.u).replace(' ', '')
             schema_fp = os.path.join(types_dir, f'{type_name}.json')
@@ -373,10 +477,10 @@ def infer_state_from_composer(composer):
     for process_id, process in processes.items():
         ports = topology.get(process_id)
         state[process_id] = {
-            "_type": "process",
-            "address": f"local:{process_id}",
-            "config": {},  # get config from process
-            "inputs": ports,
-            "outputs": ports
+            '_type': 'process',
+            'address': f'local:{process_id}',
+            'config': {},  # get config from process
+            'inputs': ports,
+            'outputs': ports
         }
     return state
