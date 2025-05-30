@@ -1,3 +1,5 @@
+import unum
+
 from vivarium.core.process import Process as VivariumProcess, Step as VivariumStep
 
 from bigraph_schema import default
@@ -7,7 +9,7 @@ from ecoli.composites.ecoli_master import run_ecoli
 from ecoli.experiments.ecoli_master_sim import EcoliSim, CONFIG_DIR_PATH
 
 from genEcoli import update_inheritance, register_types, scan_processes, update_processes, infer_state_from_composer, migrate_composite, OmniStep, OmniProcess
-from genEcoli.schemas import MISSING_TYPES
+from genEcoli.schemas import MISSING_TYPES, unum_dimension
 from genEcoli.interface import ECOLI_CORE
 
 
@@ -97,6 +99,31 @@ def test_scan_processes(core):
     return core
 
 
+def test_unum(core):
+    umol = unum.Unum(
+        {'umol': -1},
+        383.3)
+
+    import ipdb; ipdb.set_trace()
+
+    schema = {
+        '_type': 'unum',
+        '_dimension': unum_dimension(
+            umol)}
+
+    serialized = core.serialize(
+        schema,
+        umol)
+
+    deserialized = core.deserialize(
+        schema,
+        serialized)
+
+    import ipdb; ipdb.set_trace()
+
+    assert umol == deserialized
+
+
 def test_run_ecoli(core):
     # timeseries = run_ecoli()
     filename = 'default'
@@ -138,5 +165,6 @@ if __name__ == '__main__':
     core = initialize_tests()
 
     test_migrate_process(core)
+    test_unum(core)
     test_run_ecoli(core)
-    
+

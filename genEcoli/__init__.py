@@ -20,11 +20,11 @@ from ecoli.library.schema import (
 )
 
 from genEcoli.types.register import register
-from genEcoli.schemas import infer_state_from_composer
+from genEcoli.schemas import infer_state_from_composer, ECOLI_TYPES
 from genEcoli.interface import OmniStep, OmniProcess, update_inheritance, scan_processes, update_processes, migrate_composite
 
 
-TYPE_MODULES = ["unum", "unit", "bulk"]  # TODO: add more here
+TYPE_MODULES = ["unit", "bulk"]  # TODO: add more here
 
 
 def load(fp: str):
@@ -66,4 +66,9 @@ def register_types(core):
                         pass
                 register(core, schema)
 
+    core.register_types(
+        ECOLI_TYPES)
+
     return core
+
+

@@ -12,6 +12,63 @@ from bigraph_schema import deep_merge
 from bigraph_schema.type_functions import deserialize_array
 
 
+def unum_dimension(value):
+    dimension = {}
+    for unit, scale in value._unit.items():
+        entry = value._unitTable[unit]
+        base_unit = {
+            unit: scale}
+        if entry[0]:
+            base_unit = entry[0]._unit
+            base_key = list(base_unit.keys())[0]
+            base_unit[base_key] = scale
+
+        dimension.update(
+            base_unit)
+
+    return dimension
+
+
+def default_unum(schema, core):
+    return unum.Unum(
+        schema['_dimension'],
+        0)
+
+
+def serialize_unum(schema, state, core):
+    return {
+        '_type': 'unum',
+        '_dimension': unum_dimension(
+            state),
+        'units': state._unit,
+        'magnitude': state.asNumber()}
+
+
+def deserialize_unum(schema, state, core):
+    return unum.Unum(
+        state['units'],
+        state['magnitude'])
+
+
+def check_unum(schema, state, core):
+    return isinstance(state, unum.Unum)   
+
+
+ECOLI_TYPES = {
+    'unum': {
+        '_inherit': ['number'],
+        '_type_parameters': ['dimension'],
+        '_default': default_unum,
+        '_serialize': serialize_unum,
+        '_deserialize': deserialize_unum,
+        # '_generate': generate_unum,
+        # '_resolve': resolve_unum,
+        # '_dataclass': dataclass_unum,
+        '_check': check_unum,
+        'units': 'map[float]',
+        'magnitude': 'float'}}
+
+
 NONETYPE = type(None)
 DEFAULT_DICT_TYPE = 'map'
 PORTS_MAPPER = {
@@ -335,6 +392,17 @@ def infer(value: set, path: tuple):
     return infer(
         list(value),
         path)
+
+@dispatch
+def infer(value: unum.Unum, path: tuple):
+    dimension = unum_dimension(value)
+    
+    import ipdb; ipdb.set_trace()
+    return {
+        '_type': 'unum',
+        '_dimension': dimension,
+        'units': unum._unit,
+        'magnitude': unum.asNumber()}
 
 def dict_schema(values):
     return ','.join([
