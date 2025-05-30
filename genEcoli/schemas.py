@@ -61,7 +61,6 @@ def serialize_csr_matrix(schema, state, core):
         '_type': 'csr_matrix',
         '_data': 'float',
         '_shape': state.shape,
-        '_count': value.size,
         'data': core.serialize(
             {'_type': 'array', '_shape': value.data.shape, '_data': 'float'},
             value.data),
@@ -98,7 +97,6 @@ ECOLI_TYPES = {
 
     'csr_matrix': {
         '_inherit': ['array'],
-        '_type_parameters': ['count'],
         '_serialize': serialize_csr_matrix,
         '_deserialize': deserialize_csr_matrix,
         'indices': {
@@ -475,7 +473,6 @@ def infer(value: csr_matrix, path: tuple):
         '_type': 'csr_matrix',
         '_data': 'float',
         '_shape': value.shape,
-        '_count': value.size,
         'data': {
             '_shape': value.size},
         'indices': {
