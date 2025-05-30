@@ -1,9 +1,11 @@
 import copy
 import dataclasses
+from abc import ABCMeta
 from functools import wraps
 from typing import Dict, Any
 # from multipledispatch import dispatch
 from plum import dispatch
+from scipy.sparse._csr import csr_matrix
 
 import numpy as np
 import unum
@@ -54,6 +56,32 @@ def check_unum(schema, state, core):
     return isinstance(state, unum.Unum)   
 
 
+def serialize_csr_matrix(schema, state, core):
+    return {
+        '_type': 'csr_matrix',
+        '_data': 'float',
+        '_shape': state.shape,
+        '_count': value.size,
+        'data': core.serialize(
+            {'_type': 'array', '_shape': value.data.shape, '_data': 'float'},
+            value.data),
+        'indices': core.serialize(
+            {'_type': 'array', '_shape': value.indices.shape, '_data': 'integer'},
+            value.indices),
+        'pointers': core.serialize(
+            {'_type': 'array', '_shape': value.indptr.shape, '_data': 'integer'},
+            value.indptr)}
+
+def deserialize_csr_matrix(schema, state, core):
+    return csr_matrix((
+        state['data'],
+        state['indices'],
+        state['pointers']),
+        shape=state.get(
+            '_shape',
+            schema['_shape']))
+
+
 ECOLI_TYPES = {
     'unum': {
         '_inherit': ['number'],
@@ -66,7 +94,19 @@ ECOLI_TYPES = {
         # '_dataclass': dataclass_unum,
         '_check': check_unum,
         'units': 'map[float]',
-        'magnitude': 'float'}}
+        'magnitude': 'float'},
+
+    'csr_matrix': {
+        '_inherit': ['array'],
+        '_type_parameters': ['count'],
+        '_serialize': serialize_csr_matrix,
+        '_deserialize': deserialize_csr_matrix,
+        'indices': {
+            '_type': 'array',
+            '_data': 'integer'},
+        'pointers': {
+            '_type': 'array',
+            '_data': 'integer'}}}
 
 
 NONETYPE = type(None)
@@ -340,6 +380,10 @@ def infer(value: int, path: tuple):
     return 'integer'
 
 @dispatch
+def infer(value: np.int64, path: tuple):
+    return 'integer'
+
+@dispatch
 def infer(value: bool, path: tuple):
     return 'boolean'
 
@@ -403,6 +447,46 @@ def infer(value: unum.Unum, path: tuple):
         'magnitude': infer(
             value.asNumber(),
             path+(value.strUnit(),))}
+
+class Empty():
+    def method(self):
+        pass
+
+FUNCTION_TYPE = type(default_unum)
+METHOD_TYPE = type(Empty().method)
+
+@dispatch
+def infer(value: FUNCTION_TYPE, path: tuple):
+    return 'function'
+
+@dispatch
+def infer(value: METHOD_TYPE, path: tuple):
+    # TODO: add serialize/deserialize for method
+    #   by storing where in the state the method is located
+    return 'method'
+
+@dispatch
+def infer(value: ABCMeta, path: tuple):
+    return 'meta'
+
+@dispatch
+def infer(value: csr_matrix, path: tuple):
+    schema = {
+        '_type': 'csr_matrix',
+        '_data': 'float',
+        '_shape': value.shape,
+        '_count': value.size,
+        'data': {
+            '_shape': value.size},
+        'indices': {
+            '_shape': value.size},
+        'pointers': {
+            '_shape': value.size}}
+
+    import ipdb; ipdb.set_trace()
+
+    return schema
+
 
 def dict_schema(values):
     parts = []
