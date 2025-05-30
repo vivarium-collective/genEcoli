@@ -19,9 +19,9 @@ def unum_dimension(value):
         base_unit = {
             unit: scale}
         if entry[0]:
-            base_unit = entry[0]._unit
-            base_key = list(base_unit.keys())[0]
-            base_unit[base_key] = scale
+            dimension_unit = entry[0]._unit
+            base_key = list(dimension_unit.keys())[0]
+            base_unit = {base_key: scale}
 
         dimension.update(
             base_unit)
@@ -397,17 +397,26 @@ def infer(value: set, path: tuple):
 def infer(value: unum.Unum, path: tuple):
     dimension = unum_dimension(value)
     
-    import ipdb; ipdb.set_trace()
     return {
         '_type': 'unum',
         '_dimension': dimension,
-        'units': unum._unit,
-        'magnitude': unum.asNumber()}
+        'magnitude': infer(
+            value.asNumber(),
+            path+(value.strUnit(),))}
 
 def dict_schema(values):
-    return ','.join([
-        f'{key}:{value}'
-        for key, value in values.items()])
+    parts = []
+    for key, value in values.items():
+        if isinstance(value, dict):
+            part = f'({dict_schema(value)})'
+        else:
+            part = value
+        entry = f'{key}:{part}'
+        parts.append(
+            entry)
+
+    return '|'.join(
+        parts)
 
 @dispatch
 def infer(value: dict, path: tuple):

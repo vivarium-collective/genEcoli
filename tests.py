@@ -83,8 +83,6 @@ def test_migrate_process(core):
     omni = Composite({
         'state': state}, core=core)
 
-    import ipdb; ipdb.set_trace()
-
     # assert omni.state['a'] == 11.11
 
 
@@ -104,8 +102,6 @@ def test_unum(core):
         {'umol': -1},
         383.3)
 
-    import ipdb; ipdb.set_trace()
-
     schema = {
         '_type': 'unum',
         '_dimension': unum_dimension(
@@ -119,8 +115,6 @@ def test_unum(core):
         schema,
         serialized)
 
-    import ipdb; ipdb.set_trace()
-
     assert umol == deserialized
 
 
@@ -129,8 +123,6 @@ def test_run_ecoli(core):
     filename = 'default'
     sim = EcoliSim.from_file(CONFIG_DIR_PATH + filename + ".json")
     sim.build_ecoli()
-
-    import ipdb; ipdb.set_trace()
 
     core = test_scan_processes(core)
     document = migrate_composite(sim)
