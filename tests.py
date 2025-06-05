@@ -1,3 +1,6 @@
+
+from contextlib import chdir
+
 import unum
 
 from vivarium.core.process import Process as VivariumProcess, Step as VivariumStep
@@ -5,6 +8,7 @@ from vivarium.core.process import Process as VivariumProcess, Step as VivariumSt
 from bigraph_schema import default
 from process_bigraph import Composite, Process as BigraphProcess, Step as BigraphStep, ProcessTypes
 
+from wholecell.utils.filepath import ROOT_PATH
 from ecoli.composites.ecoli_master import run_ecoli
 from ecoli.experiments.ecoli_master_sim import EcoliSim, CONFIG_DIR_PATH
 
@@ -119,10 +123,11 @@ def test_unum(core):
 
 
 def test_run_ecoli(core):
-    # timeseries = run_ecoli()
-    filename = 'default'
-    sim = EcoliSim.from_file(CONFIG_DIR_PATH + filename + ".json")
-    sim.build_ecoli()
+    with chdir(ROOT_PATH):
+        # timeseries = run_ecoli()
+        filename = 'default'
+        sim = EcoliSim.from_file(CONFIG_DIR_PATH + filename + ".json")
+        sim.build_ecoli()
 
     core = test_scan_processes(core)
     document = migrate_composite(sim)
@@ -159,4 +164,3 @@ if __name__ == '__main__':
     test_migrate_process(core)
     test_unum(core)
     test_run_ecoli(core)
-
