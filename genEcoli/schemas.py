@@ -526,13 +526,26 @@ def infer(value: dict, path: tuple):
 @dispatch
 def infer(value: object, path: object):
     type_name = str(type(value))
-    if type_name not in MISSING_TYPES:
-        MISSING_TYPES[type_name] = set([])
 
-    MISSING_TYPES[type_name].add(
-        path)
+    value_keys = value.__dict__.keys()
+    value_schema = {}
 
-    return 'any'
+    for key in value_keys:
+        if not key.startswith('_'):
+            try:
+                value_schema[key] = infer(
+                    getattr(value, key),
+                    path + (key,))
+            except Exception as e:
+                if type_name not in MISSING_TYPES:
+                    MISSING_TYPES[type_name] = set([])
+
+                MISSING_TYPES[type_name].add(
+                    path)
+
+                value_schema[key] = 'any'
+
+    return value_schema
 
 
 def infer_schema(config, path=()) -> dict:
