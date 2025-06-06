@@ -2,6 +2,7 @@
 from contextlib import chdir
 
 import unum
+from scipy.sparse import csr_matrix, diags
 
 from vivarium.core.process import Process as VivariumProcess, Step as VivariumStep
 
@@ -13,7 +14,7 @@ from ecoli.composites.ecoli_master import run_ecoli
 from ecoli.experiments.ecoli_master_sim import EcoliSim, CONFIG_DIR_PATH
 
 from genEcoli import update_inheritance, register_types, scan_processes, update_processes, infer_state_from_composer, migrate_composite, OmniStep, OmniProcess
-from genEcoli.schemas import MISSING_TYPES, unum_dimension
+from genEcoli.schemas import MISSING_TYPES, infer
 from genEcoli.interface import ECOLI_CORE
 
 
@@ -106,10 +107,7 @@ def test_unum(core):
         {'umol': -1},
         383.3)
 
-    schema = {
-        '_type': 'unum',
-        '_dimension': unum_dimension(
-            umol)}
+    schema = infer(umol, ())
 
     serialized = core.serialize(
         schema,
@@ -120,6 +118,26 @@ def test_unum(core):
         serialized)
 
     assert umol == deserialized
+
+
+def test_csr(core):
+    for tp in [int, float]:
+
+        tri = diags(
+            list(map(range, range(4, 0, -1))), range(4),
+            dtype=tp, format="csr")
+
+        schema = infer(tri, ())
+
+        serialized = core.serialize(
+            schema,
+            tri)
+
+        deserialized = core.deserialize(
+            schema,
+            serialized)
+
+        assert not (tri != deserialized).nnz
 
 
 def test_run_ecoli(core):
@@ -163,4 +181,5 @@ if __name__ == '__main__':
 
     test_migrate_process(core)
     test_unum(core)
+    test_csr(core)
     test_run_ecoli(core)

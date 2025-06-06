@@ -52,32 +52,31 @@ def deserialize_unum(schema, state, core):
 
 
 def check_unum(schema, state, core):
-    return isinstance(state, unum.Unum)   
+    return isinstance(state, unum.Unum)
 
 
 def serialize_csr_matrix(schema, state, core):
     return {
-        '_type': 'csr_matrix',
-        '_data': 'float',
-        '_shape': state.shape,
-        'data': core.serialize(
-            {'_type': 'array', '_shape': value.data.shape, '_data': 'float'},
-            value.data),
-        'indices': core.serialize(
-            {'_type': 'array', '_shape': value.indices.shape, '_data': 'integer'},
-            value.indices),
-        'pointers': core.serialize(
-            {'_type': 'array', '_shape': value.indptr.shape, '_data': 'integer'},
-            value.indptr)}
+        k: schema[k]
+        for k in ['_type', '_shape', '_data']
+    } | {
+        k: core.serialize(schema[k], getattr(state, f))
+        for (k, f) in
+        [('data',) * 2, ('indices',) * 2, ('pointers', 'indptr')]
+    }
+
 
 def deserialize_csr_matrix(schema, state, core):
-    return csr_matrix((
-        state['data'],
-        state['indices'],
-        state['pointers']),
-        shape=state.get(
-            '_shape',
-            schema['_shape']))
+    match state:
+        case csr_matrix():
+            return state
+        case _:
+            return csr_matrix(
+                tuple(core.deserialize(schema[k], state[k])
+                      for k in ['data', 'indices', 'pointers']),
+                shape=state.get(
+                    '_shape',
+                    schema['_shape']))
 
 
 ECOLI_TYPES = {
@@ -373,11 +372,9 @@ MISSING_TYPES = {}
 
 
 @dispatch
-def infer(value: int, path: tuple):
-    return 'integer'
-
-@dispatch
-def infer(value: np.int64, path: tuple):
+def infer(value: (int | np.int32 | np.int64 |
+                  np.dtypes.Int32DType | np.dtypes.Int64DType),
+          path: tuple):
     return 'integer'
 
 @dispatch
@@ -385,7 +382,9 @@ def infer(value: bool, path: tuple):
     return 'boolean'
 
 @dispatch
-def infer(value: float, path: tuple):
+def infer(value: (float | np.float32 | np.float64 |
+                  np.dtypes.Float32DType | np.dtypes.Float64DType),
+          path: tuple):
     return 'float'
 
 @dispatch
@@ -468,20 +467,22 @@ def infer(value: ABCMeta, path: tuple):
 
 @dispatch
 def infer(value: csr_matrix, path: tuple):
-    schema = {
+    return {
         '_type': 'csr_matrix',
-        '_data': 'float',
         '_shape': value.shape,
+        '_data': infer(value.dtype, ()),
         'data': {
-            '_shape': value.size},
+            '_type': 'array',
+            '_shape': value.data.shape,
+            '_data': infer(value.dtype, ())},
         'indices': {
-            '_shape': value.size},
+            '_type': 'array',
+            '_shape': value.indices.shape,
+            '_data': 'integer'},
         'pointers': {
-            '_shape': value.size}}
-
-    import ipdb; ipdb.set_trace()
-
-    return schema
+            '_type': 'array',
+            '_shape': value.indptr.shape,
+            '_data': 'integer'}}
 
 
 def dict_schema(values):
