@@ -1,4 +1,5 @@
 import copy
+import traceback
 import dataclasses
 from abc import ABCMeta
 from functools import wraps
@@ -375,6 +376,20 @@ def infer(value: list, path: tuple):
 
     return f'list[{element}]'
 
+def dict_schema(schema):
+    parts = []
+    for key, subschema in schema.items():
+        if isinstance(subschema, dict):
+            part = f'({dict_schema(subschema)})'
+        else:
+            part = subschema
+        entry = f'{key}:{part}'
+        parts.append(
+            entry)
+
+    return '|'.join(
+        parts)
+
 @dispatch
 def infer(value: tuple, path: tuple):
     result = []
@@ -383,6 +398,8 @@ def infer(value: tuple, path: tuple):
         schema = infer(
             item,
             path+(key,))
+        if isinstance(schema, dict):
+            schema = dict_schema(schema)
         result.append(schema)
 
     inner = '|'.join(result)
@@ -450,20 +467,6 @@ def infer(value: csr_matrix, path: tuple):
             '_data': 'integer'}}
 
 
-def dict_schema(values):
-    parts = []
-    for key, value in values.items():
-        if isinstance(value, dict):
-            part = f'({dict_schema(value)})'
-        else:
-            part = value
-        entry = f'{key}:{part}'
-        parts.append(
-            entry)
-
-    return '|'.join(
-        parts)
-
 @dispatch
 def infer(value: dict, path: tuple):
     subvalues = {}
@@ -514,6 +517,9 @@ def infer(value: object, path: object):
                     getattr(value, key),
                     path + (key,))
             except Exception as e:
+                traceback.print_exc()
+                print(e)
+
                 if type_name not in MISSING_TYPES:
                     MISSING_TYPES[type_name] = set([])
 
