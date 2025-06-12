@@ -8,7 +8,7 @@ from bigraph_schema import deep_merge, Edge as BigraphEdge
 from bigraph_schema.protocols import local_lookup_module
 from process_bigraph import ProcessTypes, Process as BigraphProcess, Step as BigraphStep
 
-from genEcoli.schemas import collapse_defaults, get_config_schema, get_defaults_schema, infer_schema, translate_ports
+from genEcoli.schemas import collapse_defaults, infer_schema, translate_ports
 
 
 __all__ = [
@@ -194,15 +194,12 @@ def list_paths(path):
         return result
 
 
-def translate_processes(tree, topology):
+def translate_processes(core, tree, topology=None):
     if isinstance(tree, BigraphEdge):
-        process_name = tree.name
-        config = tree.parameters
-
         if not hasattr(type(tree), 'config_schema') or not type(tree).config_schema:
             type(tree).config_schema = infer_schema(
-                config,
-                path=(process_name,))
+                tree.parameters,
+                path=(tree.name,))
 
         type_name = 'step'
         state = {}
@@ -210,15 +207,30 @@ def translate_processes(tree, topology):
             type_name = 'process'
             state['interval'] = 1.0
 
+        if topology is None:
+            topology = tree.topology
+
         wires = list_paths(topology)
+
+        # tree.__init__(
+        #     parameters=config,
+        #     config=config,
+        #     core=core)
+
+        process_class = type(tree).__name__
+
+        config = translate_processes(
+            core,
+            tree.parameters)
 
         state.update({
             '_type': type_name,
-            'address': f'local:{process_name}',
+            'address': f'local:{process_class}',
             'config': config,
             'inputs': wires,
-            'outputs': wires,
-            'instance': tree})
+            'outputs': wires})
+            # 'outputs': wires,
+            # 'instance': tree})
 
         return state
 
@@ -226,21 +238,24 @@ def translate_processes(tree, topology):
         result = {}
         for key, subtree in tree.items():
             result[key] = translate_processes(
+                core,
                 subtree,
-                topology[key])
+                topology[key] if topology else None)
 
         return result
 
     else:
-        import ipdb; ipdb.set_trace()
+        return tree
 
 
-def migrate_composite(sim):
+def migrate_composite(core, sim):
     processes = translate_processes(
+        core,
         sim.ecoli.processes,
         sim.ecoli.topology)
 
     steps = translate_processes(
+        core,
         sim.ecoli.steps,
         sim.ecoli.topology)
 

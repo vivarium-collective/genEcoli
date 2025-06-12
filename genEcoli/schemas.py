@@ -9,6 +9,9 @@ from scipy.sparse._csr import csr_matrix
 import numpy as np
 import unum
 from pint import Quantity
+
+from vivarium.core.process import Process as VivariumProcess, Step as VivariumStep
+
 from bigraph_schema import deep_merge
 from bigraph_schema.type_functions import deserialize_array
 
@@ -145,44 +148,6 @@ def get_unique_fields(unique: np.ndarray) -> list[np.ndarray]:
     '''
     return [np.ascontiguousarray(unique[field]) for field in unique.dtype.names]
 
-
-def get_defaults_schema(d):
-    '''Returns a dict whose keys match that of d, except replacing innermost values (v) with their corresponding _default declarations.
-    Used for migration.
-    '''
-    if isinstance(d, dict):
-        extracted_attrs = ['_divider', '_type', '_default']
-        is_inner = any([k in extracted_attrs for k in d])
-
-        # case: is inner dict from which val type is extracted
-        if is_inner:
-            schema = {}
-            if '_divider' in d:
-                schema['_divide'] = d['_divider']
-
-            if '_type' in d:
-                schema['_type'] = d['_type']
-            
-            if '_default' in d:
-                value = d['_default'] 
-                type_id = get_schema_type(value)
-                schema['_type'] = type_id
-            
-            if len(schema.keys()) == 1 and '_type' in list(schema.keys()):
-                return schema['_type']
-            else:
-                return schema
-        # case: is outer dict
-        else:
-            # and empty (return)
-            if not len(d.keys()):
-                return 'tree'
-            # or nested (recurse)
-            else:
-                return {k: get_defaults_schema(v) for k, v in d.items()}
-    else:
-        return d
-    
 
 def collapse_defaults(d):
     '''Returns a dict whose keys match that of d, except replacing innermost values (v) with their corresponding _default declarations.
@@ -340,8 +305,8 @@ def find_defaults(params: dict) -> dict:
             nested_result = find_defaults(value)
             if '_default' in value and not nested_result:
                 val = value['_default']
-                if isinstance(val, Quantity):
-                    val = val.to_tuple()[0]
+                # if isinstance(val, Quantity):
+                #     val = val.to_tuple()[0]
                 result[key] = val
             elif nested_result:
                 result[key] = nested_result
@@ -420,8 +385,8 @@ def infer(value: tuple, path: tuple):
             path+(key,))
         result.append(schema)
 
-    return tuple(
-        result)
+    inner = '|'.join(result)
+    return f'({inner})'
 
 @dispatch
 def infer(value: NONETYPE, path: tuple):
@@ -517,11 +482,23 @@ def infer(value: dict, path: tuple):
         if isinstance(map_value, dict):
             map_value = dict_schema(
                 map_value)
+        if not map_value:
+            map_value = 'any'
 
         return f'map[{map_value}]'
 
     else:
         return subvalues
+
+@dispatch
+def infer(value: VivariumProcess, path: tuple):
+    return 'process'
+
+
+@dispatch
+def infer(value: VivariumStep, path: tuple):
+    return 'step'
+
 
 @dispatch
 def infer(value: object, path: object):
@@ -572,45 +549,6 @@ def translate_ports(ports_schema, name='top'):
     return types_found
 
 
-def get_config_schema(defaults: dict[str, Any]):
-    '''Translates vivarium.core.Process.defaults into bigraph-schema types to be consumed by pbg.Composite.'''
-    config_schema = {}
-    for k, v in defaults.copy().items():
-        if not isinstance(v, dict):
-            type_name = type(v).__name__
-            if type_name in PORTS_MAPPER.keys():
-                # handle type
-                _type = PORTS_MAPPER[type_name]
-                
-                # handle default
-                if isinstance(v, Quantity):
-                    v = v.magnitude
-                elif isinstance(v, np.ndarray):
-                    v = v.tolist()
-                elif isinstance(v, unum.Unum):
-                    v = v.asNumber()
-
-                config_schema[k] = {
-                    '_type': _type,  # TODO: provide a more specific lookup
-                    '_default': v
-                }
-        else:
-            if '_type' in v.keys():
-                # case: already has a bgs-compliant type def
-                config_schema[k] = v
-            else:
-                # case: use type with default if default value assigned
-                config_schema[k] = DEFAULT_DICT_TYPE if not len(v.keys()) else {'_type': DEFAULT_DICT_TYPE, '_default': v}
-
-    return config_schema
-
-
-def test_get_config_schema():
-    from ecoli.migrated.transcript_elongation import TranscriptElongation
-    defaults = TranscriptElongation.defaults
-    config_schema = get_config_schema(defaults)
-
-
 def export_vivarium_unit_schemas(types_dir: str | None = None):
     import json
     import os
@@ -639,19 +577,3 @@ def export_vivarium_unit_schemas(types_dir: str | None = None):
                     json.dump(schema, fp, indent=4)
 
 
-def infer_state_from_composer(composer):
-    composition = composer.generate()
-    processes = composition.get('processes')
-    topology = composition.get('topology')
-    
-    state = {}
-    for process_id, process in processes.items():
-        ports = topology.get(process_id)
-        state[process_id] = {
-            '_type': 'process',
-            'address': f'local:{process_id}',
-            'config': {},  # get config from process
-            'inputs': ports,
-            'outputs': ports
-        }
-    return state

@@ -20,7 +20,7 @@ from ecoli.library.schema import (
 )
 
 from genEcoli.types.register import register
-from genEcoli.schemas import infer_state_from_composer, ECOLI_TYPES
+from genEcoli.schemas import ECOLI_TYPES
 from genEcoli.interface import OmniStep, OmniProcess, update_inheritance, scan_processes, update_processes, migrate_composite
 
 

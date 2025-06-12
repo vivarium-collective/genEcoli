@@ -13,7 +13,7 @@ from wholecell.utils.filepath import ROOT_PATH
 from ecoli.composites.ecoli_master import run_ecoli
 from ecoli.experiments.ecoli_master_sim import EcoliSim, CONFIG_DIR_PATH
 
-from genEcoli import update_inheritance, register_types, scan_processes, update_processes, infer_state_from_composer, migrate_composite, OmniStep, OmniProcess
+from genEcoli import update_inheritance, register_types, scan_processes, update_processes, migrate_composite, OmniStep, OmniProcess
 from genEcoli.schemas import MISSING_TYPES, infer
 from genEcoli.interface import ECOLI_CORE
 
@@ -148,7 +148,7 @@ def test_run_ecoli(core):
         sim.build_ecoli()
 
     core = test_scan_processes(core)
-    document = migrate_composite(sim)
+    document = migrate_composite(core, sim)
 
     import ipdb; ipdb.set_trace()
 
