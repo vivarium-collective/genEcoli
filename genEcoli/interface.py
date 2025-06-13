@@ -259,7 +259,13 @@ def migrate_composite(core, sim):
         sim.ecoli.steps,
         sim.ecoli.topology)
 
-    deep_merge(processes, steps)
+    state = deep_merge(
+        processes,
+        steps)
+
+    state = deep_merge(
+        state,
+        sim.generated_initial_state)
 
     return {
-        'state': processes}
+        'state': state}
