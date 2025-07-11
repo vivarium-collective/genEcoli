@@ -9,7 +9,7 @@ from ecoli.library.schema import (
     bulk_numpy_updater,
 )
 
-from genEcoli.schemas import ECOLI_TYPES
+from genEcoli.infer import infer, infer_schema, ECOLI_TYPES, MISSING_TYPES
 from genEcoli.interface import OmniStep, OmniProcess, update_inheritance, scan_processes, update_processes, migrate_composite
 
 

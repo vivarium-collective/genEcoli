@@ -13,9 +13,7 @@ from wholecell.utils.filepath import ROOT_PATH
 from ecoli.composites.ecoli_master import run_ecoli
 from ecoli.experiments.ecoli_master_sim import EcoliSim, CONFIG_DIR_PATH
 
-from genEcoli import update_inheritance, register_types, scan_processes, update_processes, migrate_composite, OmniStep, OmniProcess
-from genEcoli.schemas import MISSING_TYPES, infer
-from genEcoli.interface import ECOLI_CORE
+from genEcoli import update_inheritance, register_types, scan_processes, update_processes, migrate_composite, OmniStep, OmniProcess, infer, MISSING_TYPES
 
 
 class TestStep(VivariumStep):
@@ -163,7 +161,7 @@ def test_run_ecoli(core):
 
 
 def initialize_tests():
-    core = ECOLI_CORE
+    core = ProcessTypes()
     core = register_types(core)
 
     update_inheritance(TestStep, OmniStep)

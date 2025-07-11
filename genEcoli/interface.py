@@ -8,7 +8,7 @@ from bigraph_schema import deep_merge, Edge as BigraphEdge
 from bigraph_schema.protocols import local_lookup_module
 from process_bigraph import ProcessTypes, Process as BigraphProcess, Step as BigraphStep
 
-from genEcoli.schemas import collapse_defaults, infer_schema, translate_ports
+from genEcoli.infer import infer_schema, translate_ports, collapse_defaults
 
 
 __all__ = [
