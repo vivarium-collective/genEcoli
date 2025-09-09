@@ -47,9 +47,12 @@ def serialize_unum(schema, state, core):
 
 
 def deserialize_unum(schema, state, core):
-    return unum.Unum(
-        state['units'],
-        state['magnitude'])
+    if isinstance(state, unum.Unum):
+        return state
+    else:
+        return unum.Unum(
+            state['units'],
+            state['magnitude'])
 
 
 def check_unum(schema, state, core):
@@ -129,10 +132,11 @@ def infer(value: (float | np.float32 | np.float64 |
 def infer(value: str, path: tuple):
     return 'string'
 
+def dtype_schema(d):
+    return f'dtype[{d.str}]'
+
 @dispatch
 def infer(value: np.ndarray, path: tuple):
-    import ipdb; ipdb.set_trace()
-
     shape = '|'.join([str(dimension) for dimension in value.shape])
     data = infer(
         dtype_schema(value.dtype),
@@ -280,6 +284,15 @@ def infer(value: VivariumStep, path: tuple):
 @dispatch
 def infer(value: object, path: object):
     type_name = str(type(value))
+
+    if not hasattr(value, '__dict__'):
+        if type_name not in MISSING_TYPES:
+            MISSING_TYPES[type_name] = set([])
+
+        MISSING_TYPES[type_name].add(
+            path)
+
+        return str(value)
 
     value_keys = value.__dict__.keys()
     value_schema = {}

@@ -1,4 +1,4 @@
-
+import json
 from contextlib import chdir
 
 import unum
@@ -138,6 +138,12 @@ def test_csr(core):
         assert not (tri != deserialized).nnz
 
 
+from json import JSONEncoder
+class Encoder(JSONEncoder):
+    def default(self, o):
+        return str(o)
+
+
 def test_run_ecoli(core):
     with chdir(ROOT_PATH):
         # timeseries = run_ecoli()
@@ -147,6 +153,16 @@ def test_run_ecoli(core):
 
     core = test_scan_processes(core)
     document = migrate_composite(core, sim)
+
+    import ipdb; ipdb.set_trace()
+
+    with open('out/ecoli-composite.json', 'w') as document_file:
+        json.dump(
+            document,
+            document_file,
+            indent=2,
+            cls=Encoder,
+            skipkeys=True)
 
     import ipdb; ipdb.set_trace()
 
@@ -164,8 +180,8 @@ def initialize_tests():
     core = ProcessTypes()
     core = register_types(core)
 
-    update_inheritance(TestStep, OmniStep)
-    update_inheritance(TestProcess, OmniProcess)
+    update_inheritance(TestStep, OmniStep, core)
+    update_inheritance(TestProcess, OmniProcess, core)
 
     core.register_processes({
         'test-step': TestStep,

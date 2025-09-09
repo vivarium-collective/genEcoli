@@ -21,10 +21,6 @@ class Revert:
     pass 
 
 
-# declare a global core
-ECOLI_CORE = ProcessTypes()
-
-
 class Resolver(BigraphStep):
     """Takes PartitionedProcess updates and somehow emits 
     a single update that is a resolution of their demands.
@@ -47,7 +43,6 @@ class OmniStep(BigraphStep):
     def __init__(self, parameters=None, config=None, core=None) -> None:
         parameters = parameters or config
         config = config or parameters
-        core = core or ECOLI_CORE
 
         super().__init__(
             config=config,
@@ -86,7 +81,6 @@ class OmniProcess(BigraphProcess):
     def __init__(self, parameters=None, config=None, core=None) -> None:
         parameters = parameters or config
         config = config or parameters
-        core = core or ECOLI_CORE
 
         super().__init__(
             config=config,
@@ -110,7 +104,7 @@ class OmniProcess(BigraphProcess):
         return self.next_update(interval, state)
 
 
-def update_inheritance(cls, new_base):
+def update_inheritance(cls, new_base, core):
     if new_base in cls.__bases__:
         return
 
@@ -120,20 +114,25 @@ def update_inheritance(cls, new_base):
     # store the existing init
     init = cls.__init__
 
+    core = core
+
     # wrap the existing init with an init that accepts arguments
     # specific to process-bigraph
-    def new_init(self, config=None, parameters=None, core=None):
+    def new_init(self, config=None, parameters=None, core=core):
         config = config or parameters
         parameters = parameters or config
-        core = core or ECOLI_CORE
+        core = core
 
-        init(self, parameters=parameters)
+        try:
+            init(self, parameters=parameters)
+        except Exception as e:
+            import ipdb; ipdb.set_trace()
 
         new_base.__init__(
             self,
             config,
             parameters,
-            core)
+            core=core)
 
     # replace the existing init with the new init
     cls.__init__ = new_init
@@ -174,11 +173,13 @@ def scan_processes(path):
 
 def update_processes(core, processes):
     for process_name, process in processes.get('processes', {}).items():
-        update_inheritance(process, OmniProcess)
+        update_inheritance(process, OmniProcess, core)
+        process.core = core
         core.register_process(process_name, process)
 
     for step_name, step in processes.get('steps', {}).items():
-        update_inheritance(step, OmniStep)
+        update_inheritance(step, OmniStep, core)
+        step.core = core
         core.register_process(step_name, step)
 
     return core
@@ -227,6 +228,8 @@ def translate_processes(core, tree, topology=None):
             '_type': type_name,
             'address': f'local:{process_class}',
             'config': config,
+            '_inputs': tree.inputs(),
+            '_outputs': tree.outputs(),
             'inputs': wires,
             'outputs': wires})
             # 'outputs': wires,
