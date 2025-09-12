@@ -113,42 +113,42 @@ MISSING_TYPES = {}
 
 
 @dispatch
-def infer(value: (int | np.int32 | np.int64 |
+def infer_representation(value: (int | np.int32 | np.int64 |
                   np.dtypes.Int32DType | np.dtypes.Int64DType),
           path: tuple):
     return 'integer'
 
 @dispatch
-def infer(value: bool, path: tuple):
+def infer_representation(value: bool, path: tuple):
     return 'boolean'
 
 @dispatch
-def infer(value: (float | np.float32 | np.float64 |
+def infer_representation(value: (float | np.float32 | np.float64 |
                   np.dtypes.Float32DType | np.dtypes.Float64DType),
           path: tuple):
     return 'float'
 
 @dispatch
-def infer(value: str, path: tuple):
+def infer_representation(value: str, path: tuple):
     return 'string'
 
 def dtype_schema(d):
     return f'dtype[{d.str}]'
 
 @dispatch
-def infer(value: np.ndarray, path: tuple):
+def infer_representation(value: np.ndarray, path: tuple):
     shape = '|'.join([str(dimension) for dimension in value.shape])
-    data = infer(
+    data = infer_representation(
         dtype_schema(value.dtype),
         path+('_data',))
 
     return f'array[({shape}),{data}]'
 
 @dispatch
-def infer(value: list, path: tuple):
+def infer_representation(value: list, path: tuple):
     element = 'any'
     if len(value) > 0:
-        element = infer(
+        element = infer_representation(
             value[0],
             path+('_element',))
 
@@ -169,11 +169,11 @@ def dict_schema(schema):
         parts)
 
 @dispatch
-def infer(value: tuple, path: tuple):
+def infer_representation(value: tuple, path: tuple):
     result = []
     for index, item in enumerate(value):
         key = f'_{index}'
-        schema = infer(
+        schema = infer_representation(
             item,
             path+(key,))
         if isinstance(schema, dict):
@@ -184,23 +184,23 @@ def infer(value: tuple, path: tuple):
     return f'({inner})'
 
 @dispatch
-def infer(value: NONETYPE, path: tuple):
+def infer_representation(value: NONETYPE, path: tuple):
     return 'maybe[any]'
 
 @dispatch
-def infer(value: set, path: tuple):
-    return infer(
+def infer_representation(value: set, path: tuple):
+    return infer_representation(
         list(value),
         path)
 
 @dispatch
-def infer(value: unum.Unum, path: tuple):
+def infer_representation(value: unum.Unum, path: tuple):
     dimension = unum_dimension(value)
     
     return {
         '_type': 'unum',
         '_dimension': dimension,
-        'magnitude': infer(
+        'magnitude': infer_representation(
             value.asNumber(),
             path+(value.strUnit(),))}
 
@@ -212,29 +212,29 @@ FUNCTION_TYPE = type(default_unum)
 METHOD_TYPE = type(Empty().method)
 
 @dispatch
-def infer(value: FUNCTION_TYPE, path: tuple):
+def infer_representation(value: FUNCTION_TYPE, path: tuple):
     return 'function'
 
 @dispatch
-def infer(value: METHOD_TYPE, path: tuple):
+def infer_representation(value: METHOD_TYPE, path: tuple):
     # TODO: add serialize/deserialize for method
     #   by storing where in the state the method is located
     return 'method'
 
 @dispatch
-def infer(value: ABCMeta, path: tuple):
+def infer_representation(value: ABCMeta, path: tuple):
     return 'meta'
 
 @dispatch
-def infer(value: csr_matrix, path: tuple):
+def infer_representation(value: csr_matrix, path: tuple):
     return {
         '_type': 'csr_matrix',
         '_shape': value.shape,
-        '_data': infer(value.dtype, ()),
+        '_data': infer_representation(value.dtype, ()),
         'data': {
             '_type': 'array',
             '_shape': value.data.shape,
-            '_data': infer(value.dtype, ())},
+            '_data': infer_representation(value.dtype, ())},
         'indices': {
             '_type': 'array',
             '_shape': value.indices.shape,
@@ -246,11 +246,11 @@ def infer(value: csr_matrix, path: tuple):
 
 
 @dispatch
-def infer(value: dict, path: tuple):
+def infer_representation(value: dict, path: tuple):
     subvalues = {}
     distinct_subvalues = []
     for key, subvalue in value.items():
-        subvalues[key] = infer(
+        subvalues[key] = infer_representation(
             subvalue,
             path+(key,))
 
@@ -272,17 +272,17 @@ def infer(value: dict, path: tuple):
         return subvalues
 
 @dispatch
-def infer(value: VivariumProcess, path: tuple):
+def infer_representation(value: VivariumProcess, path: tuple):
     return 'process'
 
 
 @dispatch
-def infer(value: VivariumStep, path: tuple):
+def infer_representation(value: VivariumStep, path: tuple):
     return 'step'
 
 
 @dispatch
-def infer(value: object, path: object):
+def infer_representation(value: object, path: object):
     type_name = str(type(value))
 
     if not hasattr(value, '__dict__'):
@@ -300,7 +300,7 @@ def infer(value: object, path: object):
     for key in value_keys:
         if not key.startswith('_'):
             try:
-                value_schema[key] = infer(
+                value_schema[key] = infer_representation(
                     getattr(value, key),
                     path + (key,))
             except Exception as e:
@@ -323,7 +323,7 @@ def infer_schema(config, path=()) -> dict:
     ports = {}
 
     for key, value in config.items():
-        ports[key] = infer(
+        ports[key] = infer_representation(
             value,
             path+(key,))
 

@@ -6,9 +6,10 @@ from vivarium.core.process import Process as VivariumProcess, Step as VivariumSt
 
 from bigraph_schema import deep_merge, Edge as BigraphEdge
 from bigraph_schema.protocols import local_lookup_module
+from bigraph_schema.methods.infer import infer
 from process_bigraph import ProcessTypes, Process as BigraphProcess, Step as BigraphStep
 
-from genEcoli.infer import infer_schema, translate_ports, collapse_defaults
+from genEcoli.infer import translate_ports, collapse_defaults # , infer_schema
 
 
 __all__ = [
@@ -195,12 +196,16 @@ def list_paths(path):
         return result
 
 
-def translate_processes(core, tree, topology=None):
+# TODO: ask Sean where the units are?
+#   ie cell density?
+
+def translate_processes(library, core, tree, topology=None):
     if isinstance(tree, BigraphEdge):
         if not hasattr(type(tree), 'config_schema') or not type(tree).config_schema:
-            type(tree).config_schema = infer_schema(
-                tree.parameters,
-                path=(tree.name,))
+            # type(tree).config_schema = infer_schema(
+            type(tree).config_schema = library.infer(
+                tree.parameters)
+                # path=(tree.name,))
 
         type_name = 'step'
         state = {}
@@ -220,7 +225,10 @@ def translate_processes(core, tree, topology=None):
 
         process_class = type(tree).__name__
 
+        # config_schema = infer(tree.parameters)
+
         config = translate_processes(
+            library,
             core,
             tree.parameters)
 
@@ -232,6 +240,7 @@ def translate_processes(core, tree, topology=None):
             '_outputs': tree.outputs(),
             'inputs': wires,
             'outputs': wires})
+
             # 'outputs': wires,
             # 'instance': tree})
 
@@ -241,6 +250,7 @@ def translate_processes(core, tree, topology=None):
         result = {}
         for key, subtree in tree.items():
             result[key] = translate_processes(
+                library,
                 core,
                 subtree,
                 topology[key] if topology else None)
@@ -251,13 +261,15 @@ def translate_processes(core, tree, topology=None):
         return tree
 
 
-def migrate_composite(core, sim):
+def migrate_composite(library, core, sim):
     processes = translate_processes(
+        library,
         core,
         sim.ecoli.processes,
         sim.ecoli.topology)
 
     steps = translate_processes(
+        library,
         core,
         sim.ecoli.steps,
         sim.ecoli.topology)
@@ -270,5 +282,4 @@ def migrate_composite(core, sim):
         state,
         sim.generated_initial_state)
 
-    return {
-        'state': state}
+    return state

@@ -6,14 +6,15 @@ from scipy.sparse import csr_matrix, diags
 
 from vivarium.core.process import Process as VivariumProcess, Step as VivariumStep
 
-from bigraph_schema import default
+from bigraph_schema import default, Library, BASE_TYPES
+from bigraph_schema.methods import infer
 from process_bigraph import Composite, Process as BigraphProcess, Step as BigraphStep, ProcessTypes
 
 from wholecell.utils.filepath import ROOT_PATH
 from ecoli.composites.ecoli_master import run_ecoli
 from ecoli.experiments.ecoli_master_sim import EcoliSim, CONFIG_DIR_PATH
 
-from genEcoli import update_inheritance, register_types, scan_processes, update_processes, migrate_composite, OmniStep, OmniProcess, infer, MISSING_TYPES
+from genEcoli import update_inheritance, register_types, scan_processes, update_processes, migrate_composite, OmniStep, OmniProcess, infer_representation, MISSING_TYPES
 
 
 class TestStep(VivariumStep):
@@ -89,17 +90,6 @@ def test_migrate_process(core):
     # assert omni.state['a'] == 11.11
 
 
-def test_scan_processes(core):
-    processes = scan_processes('ecoli.processes')
-    core = update_processes(
-        core,
-        processes)
-
-    assert processes['processes'] and processes['steps']
-
-    return core
-
-
 def test_unum(core):
     umol = unum.Unum(
         {'umol': -1},
@@ -144,7 +134,18 @@ class Encoder(JSONEncoder):
         return str(o)
 
 
-def test_run_ecoli(core):
+def test_scan_processes(core):
+    processes = scan_processes('ecoli.processes')
+    core = update_processes(
+        core,
+        processes)
+
+    assert processes['processes'] and processes['steps']
+
+    return core
+
+
+def test_run_ecoli(library, core):
     with chdir(ROOT_PATH):
         # timeseries = run_ecoli()
         filename = 'default'
@@ -152,9 +153,14 @@ def test_run_ecoli(core):
         sim.build_ecoli()
 
     core = test_scan_processes(core)
-    document = migrate_composite(core, sim)
+    migrate = migrate_composite(library, core, sim)
 
     import ipdb; ipdb.set_trace()
+
+    composition, state = library.generate({}, migrate)
+    document = {
+        'composition': composition,
+        'state': state}
 
     with open('out/ecoli-composite.json', 'w') as document_file:
         json.dump(
@@ -187,13 +193,16 @@ def initialize_tests():
         'test-step': TestStep,
         'test-process': TestProcess})
 
-    return core
+    library = Library(
+        BASE_TYPES)
+
+    return library, core
 
 
 if __name__ == '__main__':
-    core = initialize_tests()
+    library, core = initialize_tests()
 
     test_migrate_process(core)
     test_unum(core)
     test_csr(core)
-    test_run_ecoli(core)
+    test_run_ecoli(library, core)
