@@ -6,10 +6,9 @@ from vivarium.core.process import Process as VivariumProcess, Step as VivariumSt
 
 from bigraph_schema import deep_merge, Edge as BigraphEdge
 from bigraph_schema.protocols import local_lookup_module
-from bigraph_schema.methods.infer import infer
 from process_bigraph import ProcessTypes, Process as BigraphProcess, Step as BigraphStep
 
-from genEcoli.infer import translate_ports, collapse_defaults # , infer_schema
+from genEcoli.infer_representation import translate_ports, collapse_defaults # , infer_schema
 
 
 __all__ = [

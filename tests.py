@@ -1,13 +1,14 @@
+import numpy as np
+
 import json
 from contextlib import chdir
 
-import unum
+from unum import Unum
 from scipy.sparse import csr_matrix, diags
 
 from vivarium.core.process import Process as VivariumProcess, Step as VivariumStep
 
 from bigraph_schema import default, Library, BASE_TYPES
-from bigraph_schema.methods import infer
 from process_bigraph import Composite, Process as BigraphProcess, Step as BigraphStep, ProcessTypes
 
 from wholecell.utils.filepath import ROOT_PATH
@@ -91,11 +92,11 @@ def test_migrate_process(core):
 
 
 def test_unum(core):
-    umol = unum.Unum(
+    umol = Unum(
         {'umol': -1},
         383.3)
 
-    schema = infer(umol, ())
+    schema = infer_representation(umol, ())
 
     serialized = core.serialize(
         schema,
@@ -107,6 +108,13 @@ def test_unum(core):
 
     assert umol == deserialized
 
+    uarray = Unum(
+        {'umol': -1},
+        np.array([3.3, 4.4, 5.5]))
+
+    unum_schema = library.infer(umol)
+    uarray_schema = library.infer(uarray)
+
 
 def test_csr(core):
     for tp in [int, float]:
@@ -115,7 +123,7 @@ def test_csr(core):
             list(map(range, range(4, 0, -1))), range(4),
             dtype=tp, format="csr")
 
-        schema = infer(tri, ())
+        schema = infer_representation(tri, ())
 
         serialized = core.serialize(
             schema,
@@ -153,6 +161,9 @@ def test_run_ecoli(library, core):
         sim.build_ecoli()
 
     core = test_scan_processes(core)
+
+    import ipdb; ipdb.set_trace()
+
     migrate = migrate_composite(library, core, sim)
 
     import ipdb; ipdb.set_trace()
