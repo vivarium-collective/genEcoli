@@ -3,7 +3,7 @@ from plum import dispatch
 from dataclasses import dataclass, is_dataclass, field
 
 from bigraph_schema.schema import Node
-from bigraph_schema.methods import infer, set_default, serialize, deserialize
+from bigraph_schema.methods import infer, set_default, default, serialize, deserialize
 
 from unum import Unum
 
@@ -74,9 +74,13 @@ def infer(core, value: Unum, path: tuple = ()):
     schema = UnumUnits(**unum_data)
     schema = set_default(schema, value)
 
-    reverse = core.default(schema)
-
     return schema
+
+@default.dispatch
+def default(schema: UnumUnits):
+    return Unum(
+        schema._dimension,
+        0)
 
 @serialize.dispatch
 def serialize(schema: UnumUnits, state):
