@@ -5,6 +5,7 @@ import copy
 from vivarium.core.process import Process as VivariumProcess, Step as VivariumStep
 
 from bigraph_schema import deep_merge, Edge as BigraphEdge
+from bigraph_schema.methods import infer, render
 from bigraph_schema.protocols import local_lookup_module
 from process_bigraph import ProcessTypes, Process as BigraphProcess, Step as BigraphStep
 
@@ -104,7 +105,7 @@ class OmniProcess(BigraphProcess):
         return self.next_update(interval, state)
 
 
-def update_inheritance(cls, new_base, core):
+def update_inheritance(cls, new_base, library, core):
     if new_base in cls.__bases__:
         return
 
@@ -115,6 +116,7 @@ def update_inheritance(cls, new_base, core):
     init = cls.__init__
 
     core = core
+    library = library
 
     # wrap the existing init with an init that accepts arguments
     # specific to process-bigraph
@@ -127,6 +129,8 @@ def update_inheritance(cls, new_base, core):
             init(self, parameters=parameters)
         except Exception as e:
             import ipdb; ipdb.set_trace()
+
+        self._config = config
 
         new_base.__init__(
             self,
@@ -171,14 +175,14 @@ def scan_processes(path):
     return scan
 
 
-def update_processes(core, processes):
+def update_processes(library, core, processes):
     for process_name, process in processes.get('processes', {}).items():
-        update_inheritance(process, OmniProcess, core)
+        update_inheritance(process, OmniProcess, library, core)
         process.core = core
         core.register_process(process_name, process)
 
     for step_name, step in processes.get('steps', {}).items():
-        update_inheritance(step, OmniStep, core)
+        update_inheritance(step, OmniStep, library, core)
         step.core = core
         core.register_process(step_name, step)
 
@@ -200,11 +204,14 @@ def list_paths(path):
 
 def translate_processes(library, core, tree, topology=None):
     if isinstance(tree, BigraphEdge):
-        if not hasattr(type(tree), 'config_schema') or not type(tree).config_schema:
-            # type(tree).config_schema = infer_schema(
-            type(tree).config_schema = library.infer(
-                tree.parameters)
-                # path=(tree.name,))
+        cls = type(tree)
+
+        if not hasattr(cls, 'config_schema') or not cls.config_schema:
+            inferred_schema = library.infer(tree.parameters)
+            cls.config_schema = library.render(inferred_schema)
+
+        if not hasattr(tree, '_config'):
+            tree._config = tree.parameters
 
         type_name = 'step'
         state = {}
@@ -222,7 +229,7 @@ def translate_processes(library, core, tree, topology=None):
         #     config=config,
         #     core=core)
 
-        process_class = type(tree).__name__
+        process_class = cls.__name__
 
         # config_schema = infer(tree.parameters)
 

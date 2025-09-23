@@ -104,3 +104,4 @@ def deserialize(schema: UnumUnits, encode):
         return Unum(
             encode['units'],
             magnitude)
+

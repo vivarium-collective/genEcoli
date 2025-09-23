@@ -3,7 +3,7 @@ from plum import dispatch
 from dataclasses import dataclass, is_dataclass, field
 
 from bigraph_schema.schema import Node, Integer, Dtype, Array
-from bigraph_schema.methods import infer, set_default, serialize, deserialize
+from bigraph_schema.methods import infer, set_default, serialize, deserialize, render, wrap_default
 
 from scipy.sparse._csr import csr_matrix
 
@@ -45,16 +45,10 @@ class CSRMatrix(Node):
 def infer(core, value: csr_matrix, path: tuple = ()):
     data = {
         '_shape': value.shape,
-        '_data': infer(core, value.dtype, ()),
-        'data': Array(**{
-            '_shape': value.data.shape,
-            '_data': infer(core, value.data.dtype, ())}),
-        'indices': Array(**{
-            '_shape': value.indices.shape,
-            '_data': Integer()}),
-        'pointers': Array(**{
-            '_shape': value.indptr.shape,
-            '_data': Integer()})}
+        '_data': infer(core, value.dtype, path=path + ('_data',)),
+        'data': infer(core, value.data, path=path + ('data',)),
+        'indices': infer(core, value.indices, path=path + ('indices',)),
+        'pointers': infer(core, value.indptr, path=path + ('pointers',))}
 
     schema = CSRMatrix(**data)
     schema = set_default(schema, value)
@@ -64,10 +58,13 @@ def infer(core, value: csr_matrix, path: tuple = ()):
 
 @serialize.dispatch
 def serialize(schema: CSRMatrix, state):
-    encode = {
-        'data': serialize(schema.data, state.data),
-        'indices': serialize(schema.indices, state.indices),
-        'pointers': serialize(schema.pointers, state.indptr)}
+    if isinstance(state, dict):
+        encode = state
+    else:
+        encode = {
+            'data': serialize(schema.data, state.data),
+            'indices': serialize(schema.indices, state.indices),
+            'pointers': serialize(schema.pointers, state.indptr)}
 
     return encode
 
@@ -86,3 +83,15 @@ def deserialize(schema: CSRMatrix, encode):
         return csr_matrix(
             *inner,
             shape=schema._shape)
+
+@render.dispatch
+def render(schema: CSRMatrix):
+    data = {
+        '_shape': schema._shape,
+        '_data': render(schema._data),
+        'data': render(schema.data),
+        'indices': render(schema.indices),
+        'pointers': render(schema.pointers)}
+
+    return wrap_default(schema, data)
+    

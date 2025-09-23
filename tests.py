@@ -142,9 +142,11 @@ class Encoder(JSONEncoder):
         return str(o)
 
 
-def test_scan_processes(core):
+def test_scan_processes(library, core):
     processes = scan_processes('ecoli.processes')
+
     core = update_processes(
+        library,
         core,
         processes)
 
@@ -160,7 +162,7 @@ def test_run_ecoli(library, core):
         sim = EcoliSim.from_file(CONFIG_DIR_PATH + filename + ".json")
         sim.build_ecoli()
 
-    core = test_scan_processes(core)
+    core = test_scan_processes(library, core)
 
     import ipdb; ipdb.set_trace()
 
@@ -194,18 +196,18 @@ def test_run_ecoli(library, core):
 
 
 def initialize_tests():
+    library = Library(
+        BASE_TYPES)
+
     core = ProcessTypes()
     core = register_types(core)
 
-    update_inheritance(TestStep, OmniStep, core)
-    update_inheritance(TestProcess, OmniProcess, core)
+    update_inheritance(TestStep, OmniStep, library, core)
+    update_inheritance(TestProcess, OmniProcess, library, core)
 
     core.register_processes({
         'test-step': TestStep,
         'test-process': TestProcess})
-
-    library = Library(
-        BASE_TYPES)
 
     return library, core
 
