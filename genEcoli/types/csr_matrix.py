@@ -87,6 +87,7 @@ def deserialize(schema: CSRMatrix, encode):
 @render.dispatch
 def render(schema: CSRMatrix):
     data = {
+        '_type': 'csr_matrix',
         '_shape': schema._shape,
         '_data': render(schema._data),
         'data': render(schema.data),

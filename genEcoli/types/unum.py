@@ -3,7 +3,7 @@ from plum import dispatch
 from dataclasses import dataclass, is_dataclass, field
 
 from bigraph_schema.schema import Node
-from bigraph_schema.methods import infer, set_default, default, serialize, deserialize
+from bigraph_schema.methods import infer, set_default, default, serialize, deserialize, render, wrap_default
 
 from unum import Unum
 
@@ -56,6 +56,7 @@ def check_unum(schema, state, core):
 @dataclass(kw_only=True)
 class UnumUnits(Node):
     _dimension: typing.Dict = field(default_factory=dict)
+    units: typing.Dict = field(default_factory=dict)
     magnitude: Node = field(default_factory=Node)
 
 
@@ -69,6 +70,7 @@ def infer(core, value: Unum, path: tuple = ()):
 
     unum_data = {
         '_dimension': dimension,
+        'units': value._unit,
         'magnitude': magnitude}
 
     schema = UnumUnits(**unum_data)
@@ -84,13 +86,16 @@ def default(schema: UnumUnits):
 
 @serialize.dispatch
 def serialize(schema: UnumUnits, state):
-    magnitude = serialize(
-        schema.magnitude,
-        state.asNumber())
+    if isinstance(state, dict):
+        return state
+    else:
+        magnitude = serialize(
+            schema.magnitude,
+            state.asNumber())
 
-    return {
-        'units': state._unit,
-        'magnitude': magnitude}
+        return {
+            'units': state._unit,
+            'magnitude': magnitude}
 
 @deserialize.dispatch
 def deserialize(schema: UnumUnits, encode):
@@ -105,3 +110,13 @@ def deserialize(schema: UnumUnits, encode):
             encode['units'],
             magnitude)
 
+@render.dispatch
+def render(schema: UnumUnits):
+    data = {
+        '_type': 'unum',
+        '_dimension': schema._dimension,
+        'units': schema.units,
+        'magnitude': render(schema.magnitude)}
+
+    return wrap_default(schema, data)
+    

@@ -360,13 +360,3 @@ def collapse_defaults(d):
         return d
 
 
-def translate_ports(ports_schema, name='top'):
-    '''Translates vivarium.core.Process.defaults into bigraph-schema types to be consumed by pbg.Composite.'''
-    defaults = find_defaults(
-        ports_schema)
-
-    types_found = infer_schema(
-        defaults,
-        path=(name,))
-
-    return types_found

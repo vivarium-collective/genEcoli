@@ -9,7 +9,7 @@ from bigraph_schema.methods import infer, render
 from bigraph_schema.protocols import local_lookup_module
 from process_bigraph import ProcessTypes, Process as BigraphProcess, Step as BigraphStep
 
-from genEcoli.infer_representation import translate_ports, collapse_defaults # , infer_schema
+from genEcoli.infer_representation import collapse_defaults # , infer_schema
 
 
 __all__ = [
@@ -20,6 +20,18 @@ __all__ = [
 
 class Revert:
     pass 
+
+
+def translate_ports(library, ports_schema, name='top'):
+    '''Translates vivarium.core.Process.defaults into bigraph-schema types to be consumed by pbg.Composite.'''
+    # defaults = find_defaults(
+    #     ports_schema)
+
+    # types_found = infer(
+    #     defaults,
+    #     path=(name,))
+
+    # return types_found
 
 
 class Resolver(BigraphStep):
@@ -41,9 +53,11 @@ class OmniStep(BigraphStep):
         "outputs": []
     }
 
-    def __init__(self, parameters=None, config=None, core=None) -> None:
+    def __init__(self, parameters=None, config=None, core=None, library=None) -> None:
         parameters = parameters or config
         config = config or parameters
+
+        self.library = library
 
         super().__init__(
             config=config,
@@ -53,15 +67,23 @@ class OmniStep(BigraphStep):
         """Expects:
         self.input_port_data = {port_name: {_default: ...}}
         """
-        return translate_ports(
-            self.ports_schema(),
-            name=self.name)
+        return self.library.render(
+            self.library.infer(
+                self.ports_schema()))
+
+        # return translate_ports(
+        #     self.ports_schema(),
+        #     name=self.name)
 
     def outputs(self):
         """Use specific ports if defined, otherwise return bidirectional ports"""
-        return translate_ports(
-            self.ports_schema(),
-            name=self.name)
+        return self.library.render(
+            self.library.infer(
+                self.ports_schema()))
+
+        # return translate_ports(
+        #     self.ports_schema(),
+        #     name=self.name)
     
     def initial_state(self):
         return collapse_defaults(self.input_port_data)
@@ -79,24 +101,37 @@ class OmniProcess(BigraphProcess):
         "outputs": []
     }
 
-    def __init__(self, parameters=None, config=None, core=None) -> None:
+    def __init__(self, parameters=None, config=None, core=None, library=None) -> None:
         parameters = parameters or config
         config = config or parameters
+
+        self.library = library
 
         super().__init__(
             config=config,
             core=core)
 
     def inputs(self):
-        return translate_ports(
-            self.ports_schema(),
-            name=self.name)
+        """Expects:
+        self.input_port_data = {port_name: {_default: ...}}
+        """
+        return self.library.render(
+            self.library.infer(
+                self.ports_schema()))
+
+        # return translate_ports(
+        #     self.ports_schema(),
+        #     name=self.name)
 
     def outputs(self):
         """Use specific ports if defined, otherwise return bidirectional ports"""
-        return translate_ports(
-            self.ports_schema(),
-            name=self.name)
+        return self.library.render(
+            self.library.infer(
+                self.ports_schema()))
+
+        # return translate_ports(
+        #     self.ports_schema(),
+        #     name=self.name)
     
     def initial_state(self):
         return collapse_defaults(self.input_port_data)
@@ -136,7 +171,8 @@ def update_inheritance(cls, new_base, library, core):
             self,
             config,
             parameters,
-            core=core)
+            core=core,
+            library=library)
 
     # replace the existing init with the new init
     cls.__init__ = new_init
@@ -206,12 +242,14 @@ def translate_processes(library, core, tree, topology=None):
     if isinstance(tree, BigraphEdge):
         cls = type(tree)
 
-        if not hasattr(cls, 'config_schema') or not cls.config_schema:
-            inferred_schema = library.infer(tree.parameters)
-            cls.config_schema = library.render(inferred_schema)
+        tree.library = library
 
         if not hasattr(tree, '_config'):
             tree._config = tree.parameters
+
+        if not hasattr(cls, 'config_schema') or not cls.config_schema:
+            inferred_schema = library.infer(tree.config)
+            cls.config_schema = library.render(inferred_schema)
 
         type_name = 'step'
         state = {}
