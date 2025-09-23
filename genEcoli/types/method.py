@@ -11,7 +11,6 @@ class Method(Node):
     instance: object = field(default_factory=object)
     attribute: String = field(default_factory=String)
 
-METHOD_TYPE = type({}.keys)
 
 @infer.dispatch
 def infer(core, value: typing.Callable, path: tuple=()):
@@ -24,10 +23,24 @@ def infer(core, value: typing.Callable, path: tuple=()):
     return set_default(method, value)
 
 
+@serialize.dispatch
+def serialize(schema: Method, state):
+    if isinstance(state, dict):
+        return state
+    else:
+        return {
+            'instance': str(schema.instance),
+            'attribute': schema.attribute}
+
+@deserialize.dispatch
+def deserialize(schema: Method, encode):
+    if isinstance(encode, typing.Callable):
+        return encode
+    else:
+        import ipdb; ipdb.set_trace()
+
 @render.dispatch
 def render(schema: Method):
-    import ipdb; ipdb.set_trace()
-
     data = {
         '_type': 'method',
         'instance': str(schema.instance),
