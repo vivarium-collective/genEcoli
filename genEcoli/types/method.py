@@ -8,15 +8,23 @@ from bigraph_schema.methods import infer, set_default, serialize, deserialize, r
 
 @dataclass(kw_only=True)
 class Method(Node):
+    module: String = field(default_factory=String)
     instance: object = field(default_factory=object)
     attribute: String = field(default_factory=String)
 
 
 @infer.dispatch
 def infer(core, value: typing.Callable, path: tuple=()):
-    data = {
-        'instance': value.__self__,
-        'attribute': value.__func__.__name__}
+    if hasattr(value, '__self__'):
+        data = {
+            'module': value.__module__,
+            'instance': value.__self__.__class__.__name__,
+            'attribute': value.__func__.__name__}
+    else:
+        data = {
+            'module': value.__module__,
+            'instance': None,
+            'attribute': value.__name__}
 
     method = Method(**data)
 
@@ -29,6 +37,7 @@ def serialize(schema: Method, state):
         return state
     else:
         return {
+            'module': str(schema.module),
             'instance': str(schema.instance),
             'attribute': schema.attribute}
 
@@ -43,6 +52,7 @@ def deserialize(schema: Method, encode):
 def render(schema: Method):
     data = {
         '_type': 'method',
+        'module': schema.module,
         'instance': str(schema.instance),
         'attribute': schema.attribute}
 

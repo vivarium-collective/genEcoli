@@ -9,14 +9,14 @@ from ecoli.library.schema import (
     bulk_numpy_updater,
 )
 
-from genEcoli.infer_representation import infer_representation, infer_schema, ECOLI_TYPES, MISSING_TYPES
+from genEcoli.infer_representation import infer_representation, infer_schema, MISSING_TYPES, ECOLI_TYPES as ECOLI_TYPES_REPRESENTATION
 from genEcoli.interface import OmniStep, OmniProcess, update_inheritance, scan_processes, update_processes, migrate_composite
-import genEcoli.types 
+from genEcoli.types import ECOLI_TYPES
 
 
 def register_types(core):
     core.register_types(
-        ECOLI_TYPES)
+        ECOLI_TYPES_REPRESENTATION)
 
     return core
 

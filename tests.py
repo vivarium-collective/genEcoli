@@ -8,14 +8,14 @@ from scipy.sparse import csr_matrix, diags
 
 from vivarium.core.process import Process as VivariumProcess, Step as VivariumStep
 
-from bigraph_schema import default, Library, BASE_TYPES
+from bigraph_schema import default, Library
 from process_bigraph import Composite, Process as BigraphProcess, Step as BigraphStep, ProcessTypes
 
 from wholecell.utils.filepath import ROOT_PATH
 from ecoli.composites.ecoli_master import run_ecoli
 from ecoli.experiments.ecoli_master_sim import EcoliSim, CONFIG_DIR_PATH
 
-from genEcoli import update_inheritance, register_types, scan_processes, update_processes, migrate_composite, OmniStep, OmniProcess, infer_representation, MISSING_TYPES
+from genEcoli import update_inheritance, register_types, scan_processes, update_processes, migrate_composite, OmniStep, OmniProcess, infer_representation, MISSING_TYPES, ECOLI_TYPES
 
 
 class TestStep(VivariumStep):
@@ -163,10 +163,11 @@ def test_run_ecoli(library, core):
         sim.build_ecoli()
 
     core = test_scan_processes(library, core)
+    migrate = migrate_composite(library, core, sim)
 
     import ipdb; ipdb.set_trace()
 
-    migrate = migrate_composite(library, core, sim)
+    composition = library.infer(migrate)
 
     import ipdb; ipdb.set_trace()
 
@@ -197,7 +198,7 @@ def test_run_ecoli(library, core):
 
 def initialize_tests():
     library = Library(
-        BASE_TYPES)
+        ECOLI_TYPES)
 
     core = ProcessTypes()
     core = register_types(core)
