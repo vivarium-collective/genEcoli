@@ -1,6 +1,8 @@
 import numpy as np
 
 import json
+import pickle
+
 from contextlib import chdir
 
 from unum import Unum
@@ -155,7 +157,7 @@ def test_scan_processes(library, core):
     return core
 
 
-def test_run_ecoli(library, core):
+def test_generate_migration(library, core):
     with chdir(ROOT_PATH):
         # timeseries = run_ecoli()
         filename = 'default'
@@ -164,6 +166,18 @@ def test_run_ecoli(library, core):
 
     core = test_scan_processes(library, core)
     migrate = migrate_composite(library, core, sim)
+
+    with open("out/migrate.pickle", 'wb') as migrate_file:
+        pickle.dump(
+            migrate,
+            migrate_file)
+
+    return migrate
+
+def test_run_ecoli(library, core, migrate=None):
+    if migrate is None:
+        with open("out/migrate.pickle", 'rb') as migrate_file:
+            migrate = pickle.load(migrate_file)
 
     import ipdb; ipdb.set_trace()
 
@@ -219,4 +233,6 @@ if __name__ == '__main__':
     test_migrate_process(core)
     test_unum(core)
     test_csr(core)
-    test_run_ecoli(library, core)
+    migrate = test_generate_migration(library, core)
+    test_run_ecoli(library, core, migrate=migrate)
+    # test_run_ecoli(library, core)
