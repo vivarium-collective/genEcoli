@@ -18,7 +18,7 @@ from ecoli.composites.ecoli_master import run_ecoli
 from ecoli.experiments.ecoli_master_sim import EcoliSim, CONFIG_DIR_PATH
 
 from genEcoli import update_inheritance, register_types, scan_processes, update_processes, migrate_composite, OmniStep, OmniProcess, infer_representation, MISSING_TYPES, ECOLI_TYPES
-
+from genEcoli.types import find_units
 
 class TestStep(VivariumStep):
     defaults = {
@@ -182,6 +182,10 @@ def test_run_ecoli(library, core, migrate=None):
     import ipdb; ipdb.set_trace()
 
     composition = library.infer(migrate)
+
+    import ipdb; ipdb.set_trace()
+
+    units = find_units(composition)
 
     import ipdb; ipdb.set_trace()
 

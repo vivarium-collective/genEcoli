@@ -6,7 +6,7 @@ from bigraph_schema.schema import Node, String, Float, Edge
 from bigraph_schema.methods import infer, set_default, default, serialize, deserialize, render, wrap_default
 
 import pint
-
+ureg = pint.UnitRegistry()
 
 @dataclass(kw_only=True)
 class Quantity(Node):
@@ -68,9 +68,13 @@ def deserialize(schema: Quantity, encode):
             schema.magnitude,
             encode['magnitude'])
 
-        return pint.Quantity(
+        decode = (
             magnitude,
-            schema.units)
+            tuple([(key, value)
+                for key, value in schema.units.items()]))
+
+        return ureg.Quantity.from_tuple(
+            decode)
 
 @render.dispatch
 def render(schema: Quantity):

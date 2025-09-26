@@ -10,6 +10,8 @@ from vivarium.core.process import Process as VivariumProcess, Step as VivariumSt
 from process_bigraph import Step as BigraphStep, Process as BigraphProcess, ProcessTypes
 
 
+core = ProcessTypes()
+
 ###########################################3
 # process instances
 
@@ -104,8 +106,6 @@ def serialize(schema: FunctionEdge, raw):
         instance = state.pop('instance')
         state['config'] = serialize(instance.config_schema, state.get('config'))
     return state
-
-core = ProcessTypes()
 
 @deserialize.dispatch
 def deserialize(schema: FunctionEdge, encode):

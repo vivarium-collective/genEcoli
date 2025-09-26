@@ -80,9 +80,12 @@ def infer(core, value: Unum, path: tuple = ()):
 
 @default.dispatch
 def default(schema: UnumUnits):
-    return Unum(
-        schema._dimension,
-        0)
+    if schema._default:
+        return schema._default
+    else:
+        return Unum(
+            schema.units,
+            default(schema.magnitude))
 
 @serialize.dispatch
 def serialize(schema: UnumUnits, state):
