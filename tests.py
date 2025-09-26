@@ -185,6 +185,10 @@ def test_run_ecoli(library, core, migrate=None):
 
     import ipdb; ipdb.set_trace()
 
+    state = library.default(composition)
+
+    import ipdb; ipdb.set_trace()
+
     composition, state = library.generate({}, migrate)
     document = {
         'composition': composition,
@@ -233,6 +237,6 @@ if __name__ == '__main__':
     test_migrate_process(core)
     test_unum(core)
     test_csr(core)
-    migrate = test_generate_migration(library, core)
-    test_run_ecoli(library, core, migrate=migrate)
-    # test_run_ecoli(library, core)
+    # migrate = test_generate_migration(library, core)
+    # test_run_ecoli(library, core, migrate=migrate)
+    test_run_ecoli(library, core)
