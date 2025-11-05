@@ -34,7 +34,9 @@ class VEcoliProcess(Process):
         self.sim.update_state(state)
         return {
             "env": {
-                "cells": self.sim.ecoli_experiment.next_update(interval)
+                "cells": {
+                    f"{self.agent_id}": self.sim.ecoli_experiment.next_update(interval)
+                }
             }
         }
 
