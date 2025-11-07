@@ -9,7 +9,8 @@ dependencies = [
     "process-bigraph>=0.0.38",
     "vEcoli[dev]>=1.1.0",
     "vivarium-core>=1.6.5",
-    "plum-dispatch>=2.5"
+    "plum-dispatch>=2.5",
+    "xarray[complete]>=2025.10.1",
 ]
 
 [tool.setuptools]
@@ -21,3 +22,8 @@ packages = [
 vecoli = { path = "../vEcoli", editable = true }
 process-bigraph = { path = "../process-bigraph", editable = true }
 bigraph-schema = { path = "../bigraph-schema", editable = true }
+
+[dependency-groups]
+dev = [
+    "scipy-stubs>=1.16.3.0",
+]
