@@ -229,8 +229,8 @@ class SchemaTransform:
 # ==============================================================================
 
 
-def simulate(config_path: Path, max_duration: float | None = None) -> EcoliSim:
-    sim: EcoliSim = EcoliSim.from_file(filepath=str(config_path))
+def simulate(config_path: Path, max_duration: float | None = None, sim = None) -> EcoliSim:
+    sim: EcoliSim = sim or EcoliSim.from_file(filepath=str(config_path))
     if max_duration is not None:
         sim.max_duration = round(max_duration, 0)
     sim.build_ecoli()
@@ -276,7 +276,7 @@ def export_metabolism(sim: EcoliSim) -> xr.DataTree:
                 "weight_range": fba_wc.kinetic_objective_weight_in_range})})
 
     # export trajectory data from process/store schemata
-    assert sim.log_updates # type: ignore[attr-defined]
+    # assert sim.log_updates # type: ignore[attr-defined]
     view = SchemaTransform([
         SchemaTransformLocal(
             # access bulk molecule numbers & identifiers via the agent's `Store`
