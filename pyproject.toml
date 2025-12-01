@@ -10,20 +10,20 @@ dependencies = [
     "plum-dispatch>=2.5",
     "xarray[complete]>=2025.10.1",
     "bigraph-schema",
-    "vecoli>=0.0.4",
+    "vecoli",
 ]
 
 [tool.setuptools]
 packages = [
     "genEcoli",
     "processes",
-    "experiments",
     "data_model",
     "tests"
 ]
 
 [tool.uv.sources]
 bigraph-schema = { path = "../bigraph-schema", editable = true }
+vecoli = { path = "../vecoli_fork", editable = true }
 
 [dependency-groups]
 dev = [
