@@ -93,11 +93,11 @@ def test_vecoli_composition() -> None:
             "address": "local:vecoli-process",
             "config": config,
             "inputs": {
-                "environment": ["env0"],
+                "environment": ["environment_store"]
             },
             "outputs": {
-                "environment": ["env0"],
-                "mass": ["mass0"]
+                "environment": ["environment_store"],
+                "mass": ["mass_store_0"]
             }
         },
         "ecoli1": {
@@ -105,20 +105,32 @@ def test_vecoli_composition() -> None:
             "address": "local:vecoli-process",
             "config": config,
             "inputs": {
-                "environment": ["env1"]
+                "environment": ["environment_store"]
             },
             "outputs": {
-                "environment": ["env1"],
-                "mass": ["mass1"]
+                "environment": ["environment_store"],
+                "mass": ["mass_store_1"]
+            }
+        },
+        "ecoli2": {
+            "_type": 'process',
+            "address": "local:vecoli-process",
+            "config": config,
+            "inputs": {
+                "environment": ["environment_store"]
+            },
+            "outputs": {
+                "environment": ["environment_store"],
+                "mass": ["mass_store_2"]
             }
         }
     }
     bridge = {
         'outputs': {
-            "environment0": ["env0"],
-            "environment1": ["env1"],
-            "mass0": ["mass0"],
-            "mass1": ["mass1"]
+            "environment": ["environment_store"],
+            "mass_0": ["mass_store_0"],
+            "mass_1": ["mass_store_1"],
+            "mass_2": ["mass_store_2"]
         }
     }
     composite = Composite(config={"state": state, "bridge": bridge}, core=core)
@@ -126,5 +138,6 @@ def test_vecoli_composition() -> None:
     composite.run(2)
 
     results = composite.read_bridge()
-    print(results)
+    assert list(results.keys()) == ["environment", "mass_0", "mass_1"]
+
 
