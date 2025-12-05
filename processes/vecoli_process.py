@@ -15,38 +15,27 @@ class VEcoliProcess(PbgProcess):
 
     def initialize(self, config):
         self.simulation = EcoliDataManager.initialize_ecoli(config_path=config["config_path"])
+        self.t = 0
+
+    def initial_state(self):
+        y_0: dict = self.simulation.ecoli_experiment.state.get_value(condition=not_a_process)["agents"]["0"]
+        return {
+            "exchange": y_0["environment"]["exchange"],
+            "mass": y_0["listeners"]["mass"],
+            "t": self.simulation.ecoli_experiment.global_time
+        }
 
     def inputs(self):
         return {"environment": "tree[any]"}
 
     def outputs(self):
         return {
-            # "exchange": "tree[integer]",
-            "environment": "tree[any]",
-            "mass": "tree[float]"
+            "exchange": "tree[integer]",
+            "mass": "tree[float]",
+            "t": "float"
         }
 
     def update(self, state, interval):
-        """
-        update(state, interval) => (
-            1. env_input = state['environment']
-            2. state_update = {
-                "agents": {
-                    "0": {
-                        "environment": env_input
-                        }
-                    }
-                }
-            3. self.sim.ecoli_experiment.state.set_value(state_update)  # set/update the sim state for THAT cell based on the incoming env
-            4. self.sim.ecoli_experiment.state.update_experiment(interval)  # increment the simulation for THAT cell based on the updated sim state
-            5. y_i = self.sim.ecoli_experiment.state.get_value(condition=not_a_process)["agents"]["0"]
-            6. return {  #
-                # "exchange": y_i["environment"]["exchange"],
-                "environment": y_i["environment"],
-                "mass": y_i["listeners"]["mass"]
-            }
-        )
-        """
         engine: Engine = self.simulation.ecoli_experiment
         if engine is None:
             raise RuntimeError(
@@ -54,7 +43,6 @@ class VEcoliProcess(PbgProcess):
                 before updating!"
             )
 
-        # set/update the sim state for THAT cell based on the incoming env
         env_input = state["environment"]
         state_update = {
          "agents": {
@@ -63,19 +51,17 @@ class VEcoliProcess(PbgProcess):
                  }
              }
          }
-        # self.simulation.ecoli_experiment.state.set_value(state_update)
         engine.state.set_value(state_update)
 
-        # increment the simulation for THAT(this) cell based on the updated sim state
         self.simulation.update_experiment(interval)
+        self.t = engine.global_time
 
-        # read the appropriate data to output ports
-        # y_i = self.simulation.ecoli_experiment.state.get_value(condition=not_a_process)["agents"]["0"]
         y_i = engine.state.get_value(condition=not_a_process)["agents"]["0"]
-        return {  #
-            # "exchange": y_i["environment"]["exchange"],
-            "environment": y_i["environment"],
-            "mass": y_i["listeners"]["mass"]
+
+        return {
+            "exchange": y_i["environment"]["exchange"],
+            "mass": y_i["listeners"]["mass"],
+            "t": self.t
         }
 
 
@@ -88,7 +74,7 @@ def test_vecoli_composition() -> None:
         "config_path": str(config_path)
     }
     state = {
-        "ecoli0": {
+        "ecoli_0": {
             "_type": 'process',
             "address": "local:vecoli-process",
             "config": config,
@@ -96,11 +82,12 @@ def test_vecoli_composition() -> None:
                 "environment": ["environment_store"]
             },
             "outputs": {
-                "environment": ["environment_store"],
-                "mass": ["mass_store_0"]
+                "exchange": ["exchange_store_0"],
+                "mass": ["mass_store_0"],
+                "t": ["t_store_0"]  # sanity check
             }
         },
-        "ecoli1": {
+        "ecoli_1": {
             "_type": 'process',
             "address": "local:vecoli-process",
             "config": config,
@@ -108,11 +95,12 @@ def test_vecoli_composition() -> None:
                 "environment": ["environment_store"]
             },
             "outputs": {
-                "environment": ["environment_store"],
-                "mass": ["mass_store_1"]
+                "exchange": ["exchange_store_1"],
+                "mass": ["mass_store_1"],
+                "t": ["t_store_1"]
             }
         },
-        "ecoli2": {
+        "ecoli_2": {
             "_type": 'process',
             "address": "local:vecoli-process",
             "config": config,
@@ -120,24 +108,44 @@ def test_vecoli_composition() -> None:
                 "environment": ["environment_store"]
             },
             "outputs": {
-                "environment": ["environment_store"],
-                "mass": ["mass_store_2"]
+                "exchange": ["exchange_store_2"],
+                "mass": ["mass_store_2"],
+                "t": ["t_store_2"]
             }
         }
     }
     bridge = {
         'outputs': {
             "environment": ["environment_store"],
-            "mass_0": ["mass_store_0"],
-            "mass_1": ["mass_store_1"],
-            "mass_2": ["mass_store_2"]
+            "exchange_e0": ["exchange_store_0"],
+            "mass_e0": ["mass_store_0"],
+            "t_e0": ["t_store_0"],
+            "exchange_e1": ["exchange_store_1"],
+            "mass_e1": ["mass_store_1"],
+            "t_e1": ["t_store_1"],
+            "exchange_e2": ["exchange_store_2"],
+            "mass_e2": ["mass_store_2"],
+            "t_e2": ["t_store_2"],
         }
     }
     composite = Composite(config={"state": state, "bridge": bridge}, core=core)
-
+    composite.save("/Users/alexanderpatrie/sms/genEcoli/artifacts/colony_state.json", state=True)
+    composite.save("/Users/alexanderpatrie/sms/bigraph-builder-ui/src/assets/colony_state.json", state=True)
+    composite.save("/Users/alexanderpatrie/sms/genEcoli/artifacts/colony_state_with_schema.json", schema=True, state=True)
+    composite.save("/Users/alexanderpatrie/sms/bigraph-builder-ui/src/assets/colony_state_with_schema.json", schema=True, state=True)
     composite.run(2)
 
     results = composite.read_bridge()
-    assert list(results.keys()) == ["environment", "mass_0", "mass_1"]
+    assert list(results.keys()) == [
+        'exchange_e0',
+        'mass_e0',
+        't_e0',
+        'exchange_e1',
+        'mass_e1',
+        't_e1',
+        'exchange_e2',
+        'mass_e2',
+        't_e2'
+    ]
 
 

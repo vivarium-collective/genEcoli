@@ -3,6 +3,7 @@ import unum
 from pint import Quantity
 from functools import wraps
 from plum import dispatch
+import traceback
 from scipy.sparse._csr import csr_matrix
 
 from vivarium.core.process import Process as VivariumProcess, Step as VivariumStep

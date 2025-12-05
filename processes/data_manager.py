@@ -31,11 +31,7 @@ from pathlib import Path
 class EcoliDataManager:
     @classmethod
     def query(cls, sim: EcoliSim):
-        return sim.ecoli_experiment.state.get_value(condition=not_a_process)
-
-    @classmethod
-    def query_engine(cls, sim: EcoliSim):
-        return sim.ecoli_experiment.state.get_value(condition=not_a_process)
+        return sim.ecoli_experiment.state.get_value(condition=not_a_process)["agents"]["0"]
 
     @classmethod
     def initialize_ecoli(cls, config_path: str | None = None, sim_config: SimConfig | None = None) -> EcoliSim:
