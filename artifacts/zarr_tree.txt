@@ -1,0 +1,35 @@
+/
+├── parameters
+│   ├── gauges
+│   │   ├── cell_density () int64
+│   │   ├── doubling_time () float64
+│   │   └── time_step () float64
+│   ├── medium
+│   └── objectives
+│       ├── homeostatic
+│       │   └── weight () float64
+│       └── kinetic
+│           ├── weight_range () float64
+│           └── weight_target () float64
+└── trajectory
+    ├── bulk
+    │   ├── bulk_molecule (1112, 16268) int64
+    │   └── id_bulk_molecule (16268,) <U50
+    ├── gauges
+    │   ├── cell_mass (1112,) float64
+    │   ├── conc|count (1112,) float64
+    │   ├── dry_mass (1112,) float64
+    │   └── mass|vol (1112,) float64
+    ├── metabolism
+    │   └── fluxes
+    │       ├── exchange
+    │       │   ├── id_molecule (87,) <U41
+    │       │   └── molecule (1112, 87) float64
+    │       └── internal
+    │           ├── id_rxn (9388,) <U161
+    │           ├── id_rxn_constrained (416,) <U119
+    │           ├── id_rxn_target (416,) <U119
+    │           ├── rxn (1112, 9388) float64
+    │           ├── rxn_constrained (1112, 416) float64
+    │           └── rxn_target (1112, 416) float64
+    └── time (1112,) float32
