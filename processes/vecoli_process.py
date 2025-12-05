@@ -130,9 +130,7 @@ def test_vecoli_composition() -> None:
     }
     composite = Composite(config={"state": state, "bridge": bridge}, core=core)
     composite.save("/Users/alexanderpatrie/sms/genEcoli/artifacts/colony_state.json", state=True)
-    composite.save("/Users/alexanderpatrie/sms/bigraph-builder-ui/src/assets/colony_state.json", state=True)
     composite.save("/Users/alexanderpatrie/sms/genEcoli/artifacts/colony_state_with_schema.json", schema=True, state=True)
-    composite.save("/Users/alexanderpatrie/sms/bigraph-builder-ui/src/assets/colony_state_with_schema.json", schema=True, state=True)
     composite.run(2)
 
     results = composite.read_bridge()
