@@ -65,7 +65,7 @@ def realize(core, schema: CSRMatrix, encode, path=()):
             shape=schema._shape), []
 
 @render.dispatch
-def render(schema: CSRMatrix):
+def render(schema: CSRMatrix, defaults=False):
     data = {
         '_type': 'csr_matrix',
         '_shape': schema._shape,
@@ -74,5 +74,5 @@ def render(schema: CSRMatrix):
         'indices': render(schema.indices),
         'pointers': render(schema.pointers)}
 
-    return wrap_default(schema, data)
+    return wrap_default(schema, data) if defaults else data
     

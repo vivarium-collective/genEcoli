@@ -4,7 +4,7 @@ from plum import dispatch
 from dataclasses import dataclass, is_dataclass, field
 
 from bigraph_schema.schema import Node, String, Float, Link
-from bigraph_schema.methods import infer, set_default, serialize, render, wrap_default, resolve, merge_update
+from bigraph_schema.methods import infer, set_default, serialize, wrap_default, resolve, merge_update
 
 from vivarium.core.process import Process as VivariumProcess, Step as VivariumStep
 from process_bigraph import Step as BigraphStep, Process as BigraphProcess, StepLink, ProcessLink

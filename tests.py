@@ -3,6 +3,7 @@ import numpy as np
 import json
 import pickle
 
+from pathlib import Path
 from contextlib import chdir
 
 from unum import Unum
@@ -221,12 +222,12 @@ def initialize_tests():
     core = allocate_core()
     core.register_types(ECOLI_TYPES)
 
-    update_inheritance(TestStep, OmniStep, core)
-    update_inheritance(TestProcess, OmniProcess, core)
+    # update_inheritance(TestStep, OmniStep, core)
+    # update_inheritance(TestProcess, OmniProcess, core)
 
-    core.register_links({
-        'test-step': TestStep,
-        'test-process': TestProcess})
+    # core.register_links({
+    #     'test-step': TestStep,
+    #     'test-process': TestProcess})
 
     return core
 
@@ -234,9 +235,19 @@ def initialize_tests():
 if __name__ == '__main__':
     core = initialize_tests()
 
-    test_migrate_process(core)
+    # test_migrate_process(core)
+
     test_unum(core)
     test_csr(core)
-    # migrate = test_generate_migration(library, core)
-    # test_run_ecoli(library, core, migrate=migrate)
-    test_run_ecoli(core)
+
+    migrate = test_generate_migration(core)
+    test_run_ecoli(core, migrate=migrate)
+
+    # test_run_ecoli(core)
+
+    # if not Path('out/migrate.pickle').exists():
+    #     migrate = test_generate_migration(core)
+    #     test_run_ecoli(core, migrate=migrate)
+
+    # else:
+    #     test_run_ecoli(core)

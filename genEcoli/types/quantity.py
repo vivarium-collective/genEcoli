@@ -79,11 +79,11 @@ def realize(core, schema: Quantity, encode, path=()):
             decode), []
 
 @render.dispatch
-def render(schema: Quantity):
+def render(schema: Quantity, defaults=False):
     data = {
         '_type': 'quantity',
         'units': schema.units,
         'magnitude': render(schema.magnitude)}
 
-    return wrap_default(schema, data)
+    return wrap_default(schema, data) if defaults else data
     

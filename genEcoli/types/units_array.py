@@ -59,10 +59,10 @@ def realize(core, schema: UnitsArray, encode, path=()):
             *[head[1] for head in inner])
 
 @render.dispatch
-def render(schema: UnitsArray):
+def render(schema: UnitsArray, defaults=False):
     data = {
         'struct': render(schema.struct),
         'units': render(schema.units)}
 
-    return wrap_default(schema, data)
+    return wrap_default(schema, data) if defaults else data
     

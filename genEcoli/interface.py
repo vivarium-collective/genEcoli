@@ -60,27 +60,15 @@ class OmniStep(BigraphStep):
             core=core)
 
     def inputs(self):
-        """Expects:
-        self.input_port_data = {port_name: {_default: ...}}
-        """
         return self.core.render(
             self.core.infer(
                 self.ports_schema()))
-
-        # return translate_ports(
-        #     self.ports_schema(),
-        #     name=self.name)
 
     def outputs(self):
-        """Use specific ports if defined, otherwise return bidirectional ports"""
         return self.core.render(
             self.core.infer(
                 self.ports_schema()))
 
-        # return translate_ports(
-        #     self.ports_schema(),
-        #     name=self.name)
-    
     def initial_state(self):
         # TODO
         return {}
@@ -230,8 +218,8 @@ def translate_processes(core, tree, topology=None):
             tree._config = tree.parameters
 
         if not hasattr(cls, 'config_schema') or not cls.config_schema:
-            inferred_schema = library.infer(tree.config)
-            cls.config_schema = library.render(inferred_schema)
+            inferred_schema = core.infer(tree.config)
+            cls.config_schema = core.render(inferred_schema)
 
         type_name = 'step'
         state = {}

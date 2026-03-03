@@ -49,11 +49,11 @@ def realize(core, schema: Method, encode, path=()):
         import ipdb; ipdb.set_trace()
 
 @render.dispatch
-def render(schema: Method):
+def render(schema: Method, defaults=False):
     data = {
         '_type': 'method',
         'module': schema.module,
         'instance': str(schema.instance),
         'attribute': schema.attribute}
 
-    return wrap_default(schema, data)
+    return wrap_default(schema, data) if defaults else data

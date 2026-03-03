@@ -64,13 +64,19 @@ def serialize(schema: UnumUnits, state):
     if isinstance(state, dict):
         return state
     else:
-        magnitude = serialize(
-            schema.magnitude,
-            state.asNumber())
+        if state is None:
+            if schema._default:
+                return schema._default
+            else:
+                return default(schema)
+        else:
+            magnitude = serialize(
+                schema.magnitude,
+                state.asNumber())
 
-        return {
-            'units': state._unit,
-            'magnitude': magnitude}
+            return {
+                'units': state._unit,
+                'magnitude': magnitude}
 
 @realize.dispatch
 def realize(core, schema: UnumUnits, encode, path=()):
@@ -88,12 +94,12 @@ def realize(core, schema: UnumUnits, encode, path=()):
             magnitude), []
 
 @render.dispatch
-def render(schema: UnumUnits):
+def render(schema: UnumUnits, defaults=False):
     data = {
         '_type': 'unum',
         '_dimension': schema._dimension,
         'units': schema.units,
         'magnitude': render(schema.magnitude)}
 
-    return wrap_default(schema, data)
+    return wrap_default(schema, data) if defaults else data
     
