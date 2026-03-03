@@ -119,19 +119,11 @@ class OmniProcess(BigraphProcess):
             self.library.infer(
                 self.ports_schema()))
 
-        # return translate_ports(
-        #     self.ports_schema(),
-        #     name=self.name)
-
     def outputs(self):
         """Use specific ports if defined, otherwise return bidirectional ports"""
         return self.library.render(
             self.library.infer(
                 self.ports_schema()))
-
-        # return translate_ports(
-        #     self.ports_schema(),
-        #     name=self.name)
     
     def initial_state(self):
         return collapse_defaults(self.input_port_data)
@@ -234,9 +226,6 @@ def list_paths(path):
             result[key] = list_paths(subpath)
         return result
 
-
-# TODO: ask Sean where the units are?
-#   ie cell density?
 
 def translate_processes(library, core, tree, topology=None):
     if isinstance(tree, BigraphEdge):
