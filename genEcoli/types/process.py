@@ -3,14 +3,12 @@ import typing
 from plum import dispatch
 from dataclasses import dataclass, is_dataclass, field
 
-from bigraph_schema.schema import Node, String, Float, Edge
-from bigraph_schema.methods import infer, set_default, serialize, deserialize, render, wrap_default, resolve, merge_update
+from bigraph_schema.schema import Node, String, Float, Link
+from bigraph_schema.methods import infer, set_default, serialize, render, wrap_default, resolve, merge_update
 
 from vivarium.core.process import Process as VivariumProcess, Step as VivariumStep
-from process_bigraph import Step as BigraphStep, Process as BigraphProcess, ProcessTypes
+from process_bigraph import Step as BigraphStep, Process as BigraphProcess, StepLink, ProcessLink
 
-
-core = ProcessTypes()
 
 ###########################################3
 # process instances
@@ -33,8 +31,8 @@ class ProcessInstance(FunctionInstance):
 
 
 def function_instance_data(core, value, path):
-    if not hasattr(value, 'library'):
-        value.library = core
+    if not hasattr(value, 'core'):
+        value.core = core
 
     config = value.parameters
     if hasattr(value, 'config_schema'):
@@ -58,7 +56,7 @@ def infer(core, value: VivariumStep, path: tuple=()):
     data = function_instance_data(core, value, path)
     instance = StepInstance(**data)
 
-    return set_default(instance, value)
+    return set_default(instance, value), []
     
 
 @infer.dispatch
@@ -67,7 +65,7 @@ def infer(core, value: VivariumProcess, path: tuple=()):
     data['interval'] = Float(_default=value.parameters['timestep'])
     instance = ProcessInstance(**data)
 
-    return set_default(instance, value)
+    return set_default(instance, value), []
 
 
 
@@ -75,57 +73,48 @@ def infer(core, value: VivariumProcess, path: tuple=()):
 ###################################################33
 # process classes
 
-@dataclass(kw_only=True)
-class Protocol(Node):
-    protocol: String = field(default_factory=String)
-    data: Node = field(default_factory=Node)
+# @dataclass(kw_only=True)
+# class Protocol(Node):
+#     protocol: String = field(default_factory=String)
+#     data: Node = field(default_factory=Node)
 
-@dataclass(kw_only=True)
-class FunctionEdge(Edge):
-    address: Protocol = field(default_factory=Protocol)
-    config: Node = field(default_factory=Node)
+# @dataclass(kw_only=True)
+# class FunctionLink(Link):
+#     address: Protocol = field(default_factory=Protocol)
+#     config: Node = field(default_factory=Node)
 
-@dataclass(kw_only=True)
-class StepEdge(FunctionEdge):
-    pass
+# @resolve.dispatch
+# def resolve(current: Protocol, update: String):
+#     schema = merge_update(current, current, update)
+#     return schema
 
-@dataclass(kw_only=True)
-class ProcessEdge(FunctionEdge):
-    interval: Float = field(default_factory=Float)
+# @serialize.dispatch
+# def serialize(schema: FunctionLink, raw):
+#     state = copy.copy(raw)
+#     if 'instance' in state:
+#         instance = state.pop('instance')
+#         state['config'] = serialize(instance.config_schema, state.get('config'))
+#     return state
 
+# @realize.dispatch
+# def realize(schema: FunctionLink, encode):
+#     address = encode.get('address')
+#     result = copy.copy(encode)
 
-@resolve.dispatch
-def resolve(current: Protocol, update: String):
-    schema = merge_update(current, current, update)
-    return schema
+#     if not address:
+#         return encode
 
-@serialize.dispatch
-def serialize(schema: FunctionEdge, raw):
-    state = copy.copy(raw)
-    if 'instance' in state:
-        instance = state.pop('instance')
-        state['config'] = serialize(instance.config_schema, state.get('config'))
-    return state
+#     instantiate = core.parse_protocol(address)
 
-@deserialize.dispatch
-def deserialize(schema: FunctionEdge, encode):
-    address = encode.get('address')
-    result = copy.copy(encode)
+#     config_schema, config = realize(instantiate.config_schema, encode.get('config', {}))
+#     instance = encode.get('instance')
+#     if not instance:
+#         instance = instantiate(config, core=core)
+#         result['instance'] = instance
 
-    if not address:
-        return encode
+#     result['config'] = config
+#     result['_inputs'] = copy.deepcopy(instance.inputs())
+#     result['_outputs'] = copy.deepcopy(instance.outputs())
 
-    instantiate = core.parse_protocol(address)
-
-    config = deserialize(instantiate.config_schema, encode.get('config', {}))
-    instance = encode.get('instance')
-    if not instance:
-        instance = instantiate(config, core=core)
-        result['instance'] = instance
-
-    result['config'] = config
-    result['_inputs'] = copy.deepcopy(instance.inputs())
-    result['_outputs'] = copy.deepcopy(instance.outputs())
-
-    return result
+#     return schema, result
 

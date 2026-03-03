@@ -10,15 +10,15 @@ from scipy.sparse import csr_matrix, diags
 
 from vivarium.core.process import Process as VivariumProcess, Step as VivariumStep
 
-from bigraph_schema import default, Library
-from process_bigraph import Composite, Process as BigraphProcess, Step as BigraphStep, ProcessTypes
+from bigraph_schema import Core, allocate_core
+from process_bigraph import Composite, Process as BigraphProcess, Step as BigraphStep
 
 from wholecell.utils.filepath import ROOT_PATH
 from ecoli.composites.ecoli_master import run_ecoli
 from ecoli.experiments.ecoli_master_sim import EcoliSim, CONFIG_DIR_PATH
 
-from genEcoli import update_inheritance, register_types, scan_processes, update_processes, migrate_composite, OmniStep, OmniProcess, infer_representation, MISSING_TYPES, ECOLI_TYPES
-from genEcoli.types import find_units
+from genEcoli import update_inheritance, scan_processes, update_processes, migrate_composite, OmniStep, OmniProcess
+from genEcoli.types import find_units, ECOLI_TYPES
 
 class TestStep(VivariumStep):
     defaults = {
@@ -50,7 +50,7 @@ class TestProcess(VivariumProcess):
 
 class TestBigraph(BigraphProcess):
     config_schema = {
-        'k': default('float', 0.11)}
+        'k': 'float{0.11}'}
 
 
     def initialize(self, config):
@@ -59,13 +59,13 @@ class TestBigraph(BigraphProcess):
 
     def inputs(self):
         return {
-            'x': default('float', 11.11),
-            'y': default('float', 2.22)}
+            'x': 'float{11.11}',
+            'y': 'float{2.22}'}
 
 
     def outputs(self):
         return {
-            'z': default('float', 3)}
+            'z': 'float{3}'}
 
 
     def update(self, state, interval):
@@ -98,24 +98,24 @@ def test_unum(core):
         {'umol': -1},
         383.3)
 
-    schema = infer_representation(umol, ())
+    schema = core.infer(umol, ())
 
     serialized = core.serialize(
         schema,
         umol)
 
-    deserialized = core.deserialize(
+    realize_schema, realize_state = core.realize(
         schema,
         serialized)
 
-    assert umol == deserialized
+    assert umol == realize_state
 
     uarray = Unum(
         {'umol': -1},
         np.array([3.3, 4.4, 5.5]))
 
-    unum_schema = library.infer(umol)
-    uarray_schema = library.infer(uarray)
+    unum_schema = core.infer(umol)
+    uarray_schema = core.infer(uarray)
 
 
 def test_csr(core):
@@ -125,17 +125,17 @@ def test_csr(core):
             list(map(range, range(4, 0, -1))), range(4),
             dtype=tp, format="csr")
 
-        schema = infer_representation(tri, ())
+        schema = core.infer(tri, ())
 
         serialized = core.serialize(
             schema,
             tri)
 
-        deserialized = core.deserialize(
+        realize_schema, realize_state = core.realize(
             schema,
             serialized)
 
-        assert not (tri != deserialized).nnz
+        assert not (tri != realize_state).nnz
 
 
 from json import JSONEncoder
@@ -144,11 +144,10 @@ class Encoder(JSONEncoder):
         return str(o)
 
 
-def test_scan_processes(library, core):
+def test_scan_processes(core):
     processes = scan_processes('ecoli.processes')
 
     core = update_processes(
-        library,
         core,
         processes)
 
@@ -157,15 +156,15 @@ def test_scan_processes(library, core):
     return core
 
 
-def test_generate_migration(library, core):
+def test_generate_migration(core):
     with chdir(ROOT_PATH):
         # timeseries = run_ecoli()
         filename = 'default'
         sim = EcoliSim.from_file(CONFIG_DIR_PATH + filename + ".json")
         sim.build_ecoli()
 
-    core = test_scan_processes(library, core)
-    migrate = migrate_composite(library, core, sim)
+    core = test_scan_processes(core)
+    migrate = migrate_composite(core, sim)
 
     with open("out/migrate.pickle", 'wb') as migrate_file:
         pickle.dump(
@@ -174,14 +173,14 @@ def test_generate_migration(library, core):
 
     return migrate
 
-def test_run_ecoli(library, core, migrate=None):
+def test_run_ecoli(core, migrate=None):
     if migrate is None:
         with open("out/migrate.pickle", 'rb') as migrate_file:
             migrate = pickle.load(migrate_file)
 
     import ipdb; ipdb.set_trace()
 
-    composition = library.infer(migrate)
+    composition = core.infer(migrate)
 
     import ipdb; ipdb.set_trace()
 
@@ -189,11 +188,11 @@ def test_run_ecoli(library, core, migrate=None):
 
     import ipdb; ipdb.set_trace()
 
-    state = library.default(composition)
+    state = core.default(composition)
 
     import ipdb; ipdb.set_trace()
 
-    composition, state = library.generate({}, migrate)
+    composition, state = core.realize({}, migrate)
     document = {
         'composition': composition,
         'state': state}
@@ -219,28 +218,25 @@ def test_run_ecoli(library, core, migrate=None):
 
 
 def initialize_tests():
-    library = Library(
-        ECOLI_TYPES)
+    core = allocate_core()
+    core.register_types(ECOLI_TYPES)
 
-    core = ProcessTypes()
-    core = register_types(core)
+    update_inheritance(TestStep, OmniStep, core)
+    update_inheritance(TestProcess, OmniProcess, core)
 
-    update_inheritance(TestStep, OmniStep, library, core)
-    update_inheritance(TestProcess, OmniProcess, library, core)
-
-    core.register_processes({
+    core.register_links({
         'test-step': TestStep,
         'test-process': TestProcess})
 
-    return library, core
+    return core
 
 
 if __name__ == '__main__':
-    library, core = initialize_tests()
+    core = initialize_tests()
 
     test_migrate_process(core)
     test_unum(core)
     test_csr(core)
     # migrate = test_generate_migration(library, core)
     # test_run_ecoli(library, core, migrate=migrate)
-    test_run_ecoli(library, core)
+    test_run_ecoli(core)

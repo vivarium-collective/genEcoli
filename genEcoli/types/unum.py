@@ -3,7 +3,7 @@ from plum import dispatch
 from dataclasses import dataclass, is_dataclass, field
 
 from bigraph_schema.schema import Node
-from bigraph_schema.methods import infer, set_default, default, serialize, deserialize, render, wrap_default
+from bigraph_schema.methods import infer, set_default, default, serialize, realize, render, wrap_default
 
 from unum import Unum
 
@@ -25,34 +25,6 @@ def unum_dimension(value):
     return dimension
 
 
-def default_unum(schema, core):
-    return Unum(
-        schema['_dimension'],
-        0)
-
-
-def serialize_unum(schema, state, core):
-    return {
-        '_type': 'unum',
-        '_dimension': unum_dimension(
-            state),
-        'units': state._unit,
-        'magnitude': state.asNumber()}
-
-
-def deserialize_unum(schema, state, core):
-    if isinstance(state, Unum):
-        return state
-    else:
-        return Unum(
-            state['units'],
-            state['magnitude'])
-
-
-def check_unum(schema, state, core):
-    return isinstance(state, Unum)
-
-
 @dataclass(kw_only=True)
 class UnumUnits(Node):
     _dimension: typing.Dict = field(default_factory=dict)
@@ -63,7 +35,7 @@ class UnumUnits(Node):
 @infer.dispatch
 def infer(core, value: Unum, path: tuple = ()):
     dimension = unum_dimension(value)
-    magnitude = infer(
+    magnitude, _ = infer(
         core,
         value.asNumber(),
         path+(value.strUnit(),))
@@ -76,7 +48,7 @@ def infer(core, value: Unum, path: tuple = ()):
     schema = UnumUnits(**unum_data)
     schema = set_default(schema, value)
 
-    return schema
+    return schema, []
 
 @default.dispatch
 def default(schema: UnumUnits):
@@ -100,18 +72,20 @@ def serialize(schema: UnumUnits, state):
             'units': state._unit,
             'magnitude': magnitude}
 
-@deserialize.dispatch
-def deserialize(schema: UnumUnits, encode):
+@realize.dispatch
+def realize(core, schema: UnumUnits, encode, path=()):
     if isinstance(encode, Unum):
-        return encode
+        return schema, encode, []
     else:
-        magnitude = deserialize(
+        _, magnitude, _ = realize(
+            core,
             schema.magnitude,
-            encode['magnitude'])
+            encode['magnitude'],
+            path=path)
 
-        return Unum(
+        return schema, Unum(
             encode['units'],
-            magnitude)
+            magnitude), []
 
 @render.dispatch
 def render(schema: UnumUnits):

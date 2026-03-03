@@ -1,7 +1,7 @@
 from plum import dispatch
 
 from bigraph_schema.schema import Node
-from bigraph_schema.methods import default, deserialize
+from bigraph_schema.methods import default
 
 from genEcoli.types.unum import UnumUnits
 from genEcoli.types.quantity import Quantity
@@ -10,15 +10,11 @@ from genEcoli.types.quantity import Quantity
 
 @dispatch
 def find_units(schema: UnumUnits):
-    return str(deserialize(
-        schema,
-        default(schema)))
+    return str(default(schema))
 
 @dispatch
 def find_units(schema: Quantity):
-    return str(deserialize(
-        schema,
-        default(schema)))
+    return str(default(schema))
 
 @dispatch
 def find_units(schema: Node):

@@ -2,8 +2,8 @@ import typing
 from plum import dispatch
 from dataclasses import dataclass, is_dataclass, field
 
-from bigraph_schema.schema import Node, String, Float, Edge
-from bigraph_schema.methods import infer, set_default, default, serialize, deserialize, render, wrap_default
+from bigraph_schema.schema import Node, String, Float, Link
+from bigraph_schema.methods import infer, set_default, default, serialize, realize, render, wrap_default
 
 import pint
 ureg = pint.UnitRegistry()
@@ -23,7 +23,7 @@ def units_dict(value):
 @infer.dispatch
 def infer(core, value: pint.Quantity, path: tuple = ()):
     units = units_dict(value)
-    magnitude = infer(
+    magnitude, _ = infer(
         core,
         value.magnitude,
         path+('magnitude',))
@@ -35,7 +35,7 @@ def infer(core, value: pint.Quantity, path: tuple = ()):
     schema = Quantity(**data)
     schema = set_default(schema, value)
 
-    return schema
+    return schema, []
 
 @default.dispatch
 def default(schema: Quantity):
@@ -59,22 +59,24 @@ def serialize(schema: Quantity, state):
             'units': schema.units,
             'magnitude': magnitude}
 
-@deserialize.dispatch
-def deserialize(schema: Quantity, encode):
+@realize.dispatch
+def realize(core, schema: Quantity, encode, path=()):
     if isinstance(encode, pint.Quantity):
-        return encode
+        return schema, encode
     else:
-        magnitude = deserialize(
+        _, magnitude, _ = realize(
+            core,
             schema.magnitude,
-            encode['magnitude'])
+            encode['magnitude'],
+            path+('magnitude',))
 
         decode = (
             magnitude,
             tuple([(key, value)
                 for key, value in schema.units.items()]))
 
-        return ureg.Quantity.from_tuple(
-            decode)
+        return schema, ureg.Quantity.from_tuple(
+            decode), []
 
 @render.dispatch
 def render(schema: Quantity):
