@@ -52,11 +52,11 @@ def realize(core, schema: UnitsArray, encode, path=()):
                 core,
                 getattr(schema, key),
                 encode[key],
-                path+(key,))
-            for key in ['struct', 'units']),
+                path+(key,))[1]
+            for key in ['struct', 'units'])
 
         return schema, UnitStructArray(
-            *[head[1] for head in inner])
+            *inner)
 
 @render.dispatch
 def render(schema: UnitsArray, defaults=False):

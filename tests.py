@@ -181,11 +181,17 @@ def test_run_ecoli(core, migrate=None):
 
     import ipdb; ipdb.set_trace()
 
-    composition = core.infer(migrate)
+    inferred = core.infer(migrate)
 
     import ipdb; ipdb.set_trace()
 
-    units = find_units(composition)
+    units = find_units(inferred)
+
+    import ipdb; ipdb.set_trace()
+
+    composition, state = core.realize(
+        inferred,
+        migrate)
 
     import ipdb; ipdb.set_trace()
 
@@ -193,7 +199,6 @@ def test_run_ecoli(core, migrate=None):
 
     import ipdb; ipdb.set_trace()
 
-    composition, state = core.realize({}, migrate)
     document = {
         'composition': composition,
         'state': state}

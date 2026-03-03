@@ -129,7 +129,7 @@ def update_inheritance(cls, new_base, core):
 
     # wrap the existing init with an init that accepts arguments
     # specific to process-bigraph
-    def new_init(self, config=None, parameters=None, core=core):
+    def new_init(self, config=None, core=core, parameters=None):
         config = config or parameters
         parameters = parameters or config
         core = core
@@ -143,8 +143,8 @@ def update_inheritance(cls, new_base, core):
 
         new_base.__init__(
             self,
-            config,
-            parameters,
+            config=config,
+            parameters=parameters,
             core=core)
 
     # replace the existing init with the new init

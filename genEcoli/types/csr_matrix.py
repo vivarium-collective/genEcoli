@@ -4,7 +4,7 @@ from plum import dispatch
 from dataclasses import dataclass, is_dataclass, field
 
 from bigraph_schema.schema import Node, Integer, Array
-from bigraph_schema.methods import infer, set_default, serialize, realize, render, wrap_default
+from bigraph_schema.methods import infer, set_default, serialize, realize, render, wrap_default, reify_schema, validate
 
 from scipy.sparse._csr import csr_matrix
 
@@ -64,6 +64,15 @@ def realize(core, schema: CSRMatrix, encode, path=()):
             inner,
             shape=schema._shape), []
 
+@reify_schema.dispatch
+def reify_schema(core, schema: CSRMatrix, parameters):
+    for key, parameter in parameters.items():
+        subkey = core.access(parameter)
+        setattr(schema, key, subkey)
+
+    return schema
+        
+
 @render.dispatch
 def render(schema: CSRMatrix, defaults=False):
     data = {
@@ -76,3 +85,7 @@ def render(schema: CSRMatrix, defaults=False):
 
     return wrap_default(schema, data) if defaults else data
     
+@validate.dispatch
+def validate(core, schema: CSRMatrix, state):
+    # TODO: validate csr_matrix
+    return
