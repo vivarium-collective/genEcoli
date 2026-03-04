@@ -5,9 +5,12 @@ import copy
 from vivarium.core.process import Process as VivariumProcess, Step as VivariumStep
 
 from bigraph_schema import deep_merge, Edge as BigraphEdge
+from bigraph_schema.schema import Node, Overwrite
 from bigraph_schema.methods import infer, render
 from bigraph_schema.protocols import local_lookup_module
 from process_bigraph import Process as BigraphProcess, Step as BigraphStep
+
+from genEcoli.types.process import translate_ports
 
 
 __all__ = [
@@ -18,18 +21,6 @@ __all__ = [
 
 class Revert:
     pass 
-
-
-def translate_ports(ports_schema, name='top'):
-    '''Translates vivarium.core.Process.defaults into bigraph-schema types to be consumed by pbg.Composite.'''
-    # defaults = find_defaults(
-    #     ports_schema)
-
-    # types_found = infer(
-    #     defaults,
-    #     path=(name,))
-
-    # return types_found
 
 
 class Resolver(BigraphStep):
@@ -60,14 +51,14 @@ class OmniStep(BigraphStep):
             core=core)
 
     def inputs(self):
-        return self.core.render(
-            self.core.infer(
-                self.ports_schema()))
+        return translate_ports(
+            self.core,
+            self.ports_schema())
 
     def outputs(self):
-        return self.core.render(
-            self.core.infer(
-                self.ports_schema()))
+        return translate_ports(
+            self.core,
+            self.ports_schema())
 
     def initial_state(self):
         # TODO
@@ -98,20 +89,22 @@ class OmniProcess(BigraphProcess):
         """Expects:
         self.input_port_data = {port_name: {_default: ...}}
         """
-        return self.core.render(
-            self.core.infer(
-                self.ports_schema()))
+        return translate_ports(
+            self.core,
+            self.ports_schema())
 
     def outputs(self):
         """Use specific ports if defined, otherwise return bidirectional ports"""
-        return self.core.render(
-            self.core.infer(
-                self.ports_schema()))
-    
+        return translate_ports(
+            self.core,
+            self.ports_schema())
+
     def initial_state(self):
         return collapse_defaults(self.input_port_data)
     
     def update(self, state, interval):
+        import ipdb; ipdb.set_trace()
+
         return self.next_update(interval, state)
 
 
@@ -198,6 +191,15 @@ def update_processes(core, processes):
     return core
 
 
+def scan_update(core, path):
+    processes = scan_processes(path)
+    core = update_processes(
+        core,
+        processes)
+
+    return core
+
+
 def list_paths(path):
     if isinstance(path, tuple):
         return list(path)
@@ -226,6 +228,8 @@ def translate_processes(core, tree, topology=None):
         if isinstance(tree, BigraphProcess):
             type_name = 'process'
             state['interval'] = 1.0
+        else:
+            state['priority'] = 1.0
 
         if topology is None:
             topology = tree.topology
@@ -251,11 +255,9 @@ def translate_processes(core, tree, topology=None):
             'config': config,
             '_inputs': tree.inputs(),
             '_outputs': tree.outputs(),
+            'instance': tree,
             'inputs': wires,
             'outputs': wires})
-
-            # 'outputs': wires,
-            # 'instance': tree})
 
         return state
 

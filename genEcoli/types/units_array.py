@@ -45,7 +45,7 @@ def serialize(schema: UnitsArray, state):
 @realize.dispatch
 def realize(core, schema: UnitsArray, encode, path=()):
     if isinstance(encode, UnitStructArray):
-        return encode
+        return schema, encode, []
     else:
         inner = tuple(
             realize(
@@ -56,7 +56,7 @@ def realize(core, schema: UnitsArray, encode, path=()):
             for key in ['struct', 'units'])
 
         return schema, UnitStructArray(
-            *inner)
+            *inner), []
 
 @render.dispatch
 def render(schema: UnitsArray, defaults=False):

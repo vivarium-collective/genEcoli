@@ -18,7 +18,7 @@ from wholecell.utils.filepath import ROOT_PATH
 from ecoli.composites.ecoli_master import run_ecoli
 from ecoli.experiments.ecoli_master_sim import EcoliSim, CONFIG_DIR_PATH
 
-from genEcoli import update_inheritance, scan_processes, update_processes, migrate_composite, OmniStep, OmniProcess
+from genEcoli import update_inheritance, scan_processes, update_processes, migrate_composite, OmniStep, OmniProcess, scan_update
 from genEcoli.types import find_units, ECOLI_TYPES
 
 class TestStep(VivariumStep):
@@ -147,7 +147,6 @@ class Encoder(JSONEncoder):
 
 def test_scan_processes(core):
     processes = scan_processes('ecoli.processes')
-
     core = update_processes(
         core,
         processes)
@@ -185,23 +184,15 @@ def test_run_ecoli(core, migrate=None):
 
     import ipdb; ipdb.set_trace()
 
-    units = find_units(inferred)
-
-    import ipdb; ipdb.set_trace()
-
-    composition, state = core.realize(
+    schema, state = core.realize(
         inferred,
         migrate)
 
     import ipdb; ipdb.set_trace()
 
-    state = core.default(composition)
-
-    import ipdb; ipdb.set_trace()
-
     document = {
-        'composition': composition,
-        'state': state}
+        'schema': core.render(schema),
+        'state': core.serialize(schema, state)}
 
     with open('out/ecoli-composite.json', 'w') as document_file:
         json.dump(
@@ -213,7 +204,13 @@ def test_run_ecoli(core, migrate=None):
 
     import ipdb; ipdb.set_trace()
 
-    ecoli = Composite(document, core=core)
+    composite_config = {
+        'schema': inferred,
+        'state': migrate}
+
+    ecoli = Composite(
+        composite_config,
+        core=core)
 
     import ipdb; ipdb.set_trace()
 
@@ -222,10 +219,21 @@ def test_run_ecoli(core, migrate=None):
 
     import ipdb; ipdb.set_trace()
 
+    # units = find_units(inferred)
+
+    # import ipdb; ipdb.set_trace()
+
+    # state = core.default(composition)
+
+    # import ipdb; ipdb.set_trace()
+
 
 def initialize_tests():
     core = allocate_core()
     core.register_types(ECOLI_TYPES)
+    core = scan_update(
+        core,
+        'ecoli.processes')
 
     # update_inheritance(TestStep, OmniStep, core)
     # update_inheritance(TestProcess, OmniProcess, core)
@@ -245,14 +253,14 @@ if __name__ == '__main__':
     test_unum(core)
     test_csr(core)
 
-    migrate = test_generate_migration(core)
-    test_run_ecoli(core, migrate=migrate)
+    # migrate = test_generate_migration(core)
+    # test_run_ecoli(core, migrate=migrate)
 
     # test_run_ecoli(core)
 
-    # if not Path('out/migrate.pickle').exists():
-    #     migrate = test_generate_migration(core)
-    #     test_run_ecoli(core, migrate=migrate)
+    if not Path('out/migrate.pickle').exists():
+        migrate = test_generate_migration(core)
+        test_run_ecoli(core, migrate=migrate)
 
-    # else:
-    #     test_run_ecoli(core)
+    else:
+        test_run_ecoli(core)

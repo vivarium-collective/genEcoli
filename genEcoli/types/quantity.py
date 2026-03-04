@@ -2,8 +2,8 @@ import typing
 from plum import dispatch
 from dataclasses import dataclass, is_dataclass, field
 
-from bigraph_schema.schema import Node, String, Float, Link
-from bigraph_schema.methods import infer, set_default, default, serialize, realize, render, wrap_default
+from bigraph_schema.schema import Node, String, Float, Link, Integer, Array
+from bigraph_schema.methods import infer, set_default, default, serialize, realize, render, wrap_default, resolve
 
 import pint
 ureg = pint.UnitRegistry()
@@ -50,6 +50,14 @@ def default(schema: Quantity):
 def serialize(schema: Quantity, state):
     if isinstance(state, dict):
         return state
+
+    elif isinstance(state, int):
+        return {
+            'units': schema.units,
+            'magnitude': serialize(
+                schema.magnitude,
+                state)}
+
     else:
         magnitude = serialize(
             schema.magnitude,
@@ -59,10 +67,24 @@ def serialize(schema: Quantity, state):
             'units': schema.units,
             'magnitude': magnitude}
 
+@resolve.dispatch
+def resolve(schema: Integer, update: Array, path=()):
+    return update
+
+@resolve.dispatch
+def resolve(schema: Quantity, update: Quantity, path=()):
+    if schema.units == update.units:
+        # TODO: transfer default?
+        return update
+
+@resolve.dispatch
+def resolve(schema: Quantity, update: Integer, path=()):
+    return schema
+
 @realize.dispatch
 def realize(core, schema: Quantity, encode, path=()):
     if isinstance(encode, pint.Quantity):
-        return schema, encode
+        return schema, encode, []
     else:
         _, magnitude, _ = realize(
             core,
