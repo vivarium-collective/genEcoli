@@ -3,7 +3,7 @@ from plum import dispatch
 from dataclasses import dataclass, is_dataclass, field
 
 from bigraph_schema.schema import Node
-from bigraph_schema.methods import infer, set_default, default, serialize, realize, render, wrap_default
+from bigraph_schema.methods import infer, set_default, default, serialize, realize, render, wrap_default, resolve
 
 from unum import Unum
 
@@ -77,6 +77,11 @@ def serialize(schema: UnumUnits, state):
             return {
                 'units': state._unit,
                 'magnitude': magnitude}
+
+@resolve.dispatch
+def resolve(schema: UnumUnits, update: UnumUnits, path=()):
+    # TODO: expand on this
+    return schema
 
 @realize.dispatch
 def realize(core, schema: UnumUnits, encode, path=()):

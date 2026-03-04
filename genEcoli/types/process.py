@@ -30,6 +30,7 @@ def translate_ports(core, ports, path=()):
                 if ports['_updater'] == 'set':
                     schema = Overwrite(_value=schema)
 
+            schema._default = state
             return schema
 
         elif '_updater' in ports:

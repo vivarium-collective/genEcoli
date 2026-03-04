@@ -18,7 +18,7 @@ def units_dict(value):
     return {
         key: subvalue
         for key, subvalue in value.unit_items()}
-    
+
 
 @infer.dispatch
 def infer(core, value: pint.Quantity, path: tuple = ()):
@@ -90,7 +90,7 @@ def resolve(schema: Tuple, update: List, path=()):
 def realize(core, schema: Quantity, encode, path=()):
     if isinstance(encode, pint.Quantity):
         return schema, encode, []
-    else:
+    elif isinstance(encode, dict):
         _, magnitude, _ = realize(
             core,
             schema.magnitude,
@@ -102,8 +102,15 @@ def realize(core, schema: Quantity, encode, path=()):
             tuple([(key, value)
                 for key, value in schema.units.items()]))
 
-        return schema, ureg.Quantity.from_tuple(
-            decode), []
+    else:
+        decode = (
+            encode,
+            tuple([(key, value)
+                for key, value in schema.units.items()]))
+
+    return schema, ureg.Quantity.from_tuple(
+        decode), []
+
 
 @render.dispatch
 def render(schema: Quantity, defaults=False):

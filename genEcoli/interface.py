@@ -103,8 +103,7 @@ class OmniProcess(BigraphProcess):
         return collapse_defaults(self.input_port_data)
     
     def update(self, state, interval):
-        import ipdb; ipdb.set_trace()
-
+        # import ipdb; ipdb.set_trace()
         return self.next_update(interval, state)
 
 
