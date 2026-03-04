@@ -22,11 +22,21 @@ def translate_ports(core, ports, path=()):
         if '_default' in ports:
             # we are at a leaf
             state = ports['_default']
+            if isinstance(state, tuple) and state == ():
+                state = []
             schema = core.infer(state)
 
             if '_updater' in ports:
                 if ports['_updater'] == 'set':
                     schema = Overwrite(_value=schema)
+
+            return schema
+
+        elif '_updater' in ports:
+            schema = Node()
+
+            if ports['_updater'] == 'set':
+                schema = Overwrite(_value=schema)
 
             return schema
 

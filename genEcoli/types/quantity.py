@@ -2,7 +2,7 @@ import typing
 from plum import dispatch
 from dataclasses import dataclass, is_dataclass, field
 
-from bigraph_schema.schema import Node, String, Float, Link, Integer, Array
+from bigraph_schema.schema import Node, String, Float, Link, Integer, Array, List, Tuple
 from bigraph_schema.methods import infer, set_default, default, serialize, realize, render, wrap_default, resolve
 
 import pint
@@ -79,6 +79,11 @@ def resolve(schema: Quantity, update: Quantity, path=()):
 
 @resolve.dispatch
 def resolve(schema: Quantity, update: Integer, path=()):
+    return schema
+
+@resolve.dispatch
+def resolve(schema: Tuple, update: List, path=()):
+    # TODO: expand on this
     return schema
 
 @realize.dispatch
