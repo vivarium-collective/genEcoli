@@ -194,6 +194,20 @@ def test_run_ecoli(core, migrate=None):
 
     import ipdb; ipdb.set_trace()
 
+    document = {
+        'schema': core.render(inferred),
+        'state': core.serialize(inferred, migrate)}
+
+    with open('out/ecoli-composite.json', 'w') as document_file:
+        json.dump(
+            document,
+            document_file,
+            indent=2,
+            cls=Encoder,
+            skipkeys=True)
+
+    import ipdb; ipdb.set_trace()
+
     ecoli.save()
 
     import ipdb; ipdb.set_trace()
@@ -203,23 +217,11 @@ def test_run_ecoli(core, migrate=None):
 
     import ipdb; ipdb.set_trace()
 
+
+
     # schema, state = core.realize(
     #     inferred,
     #     migrate)
-
-    # import ipdb; ipdb.set_trace()
-
-    # document = {
-    #     'schema': core.render(inferred),
-    #     'state': core.serialize(inferred, state)}
-
-    # with open('out/ecoli-composite.json', 'w') as document_file:
-    #     json.dump(
-    #         document,
-    #         document_file,
-    #         indent=2,
-    #         cls=Encoder,
-    #         skipkeys=True)
 
     # import ipdb; ipdb.set_trace()
 
