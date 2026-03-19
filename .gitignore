@@ -21,7 +21,6 @@ devenv.lock
 .pre-commit-config.yaml
 
 # vEcoli
-reconstruction/
 .python-version
 out/
 .idea
