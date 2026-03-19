@@ -2,7 +2,7 @@ from genEcoli.types.unum import UnumUnits
 from genEcoli.types.quantity import Quantity
 from genEcoli.types.csr_matrix import CSRMatrix
 from genEcoli.types.units_array import UnitsArray
-from genEcoli.types.process import StepInstance, ProcessInstance, StepEdge, ProcessEdge
+from genEcoli.types.process import StepInstance, ProcessInstance, StepLink, ProcessLink
 from genEcoli.types.method import Method
 from genEcoli.types.find_units import find_units
 
@@ -16,7 +16,6 @@ ECOLI_TYPES = {
     'method': Method,
     'step_instance': StepInstance,
     'process_instance': ProcessInstance,
-    'step': StepEdge,
-    'process': ProcessEdge}
+    'step': StepLink,
+    'process': ProcessLink}
 
-ECOLI_TYPES.update(BASE_TYPES)

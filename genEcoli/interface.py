@@ -5,11 +5,12 @@ import copy
 from vivarium.core.process import Process as VivariumProcess, Step as VivariumStep
 
 from bigraph_schema import deep_merge, Edge as BigraphEdge
+from bigraph_schema.schema import Node, Overwrite
 from bigraph_schema.methods import infer, render
 from bigraph_schema.protocols import local_lookup_module
-from process_bigraph import ProcessTypes, Process as BigraphProcess, Step as BigraphStep
+from process_bigraph import Process as BigraphProcess, Step as BigraphStep
 
-from genEcoli.infer_representation import collapse_defaults # , infer_schema
+from genEcoli.types.process import translate_ports
 
 
 __all__ = [
@@ -20,18 +21,6 @@ __all__ = [
 
 class Revert:
     pass 
-
-
-def translate_ports(library, ports_schema, name='top'):
-    '''Translates vivarium.core.Process.defaults into bigraph-schema types to be consumed by pbg.Composite.'''
-    # defaults = find_defaults(
-    #     ports_schema)
-
-    # types_found = infer(
-    #     defaults,
-    #     path=(name,))
-
-    # return types_found
 
 
 class Resolver(BigraphStep):
@@ -53,40 +42,27 @@ class OmniStep(BigraphStep):
         "outputs": []
     }
 
-    def __init__(self, parameters=None, config=None, core=None, library=None) -> None:
+    def __init__(self, parameters=None, config=None, core=None) -> None:
         parameters = parameters or config
         config = config or parameters
-
-        self.library = library
 
         super().__init__(
             config=config,
             core=core)
 
     def inputs(self):
-        """Expects:
-        self.input_port_data = {port_name: {_default: ...}}
-        """
-        return self.library.render(
-            self.library.infer(
-                self.ports_schema()))
-
-        # return translate_ports(
-        #     self.ports_schema(),
-        #     name=self.name)
+        return translate_ports(
+            self.core,
+            self.ports_schema())
 
     def outputs(self):
-        """Use specific ports if defined, otherwise return bidirectional ports"""
-        return self.library.render(
-            self.library.infer(
-                self.ports_schema()))
+        return translate_ports(
+            self.core,
+            self.ports_schema())
 
-        # return translate_ports(
-        #     self.ports_schema(),
-        #     name=self.name)
-    
     def initial_state(self):
-        return collapse_defaults(self.input_port_data)
+        # TODO
+        return {}
     
     @abstractmethod
     def update(self, state):
@@ -101,11 +77,9 @@ class OmniProcess(BigraphProcess):
         "outputs": []
     }
 
-    def __init__(self, parameters=None, config=None, core=None, library=None) -> None:
+    def __init__(self, parameters=None, config=None, core=None) -> None:
         parameters = parameters or config
         config = config or parameters
-
-        self.library = library
 
         super().__init__(
             config=config,
@@ -115,32 +89,25 @@ class OmniProcess(BigraphProcess):
         """Expects:
         self.input_port_data = {port_name: {_default: ...}}
         """
-        return self.library.render(
-            self.library.infer(
-                self.ports_schema()))
-
-        # return translate_ports(
-        #     self.ports_schema(),
-        #     name=self.name)
+        return translate_ports(
+            self.core,
+            self.ports_schema())
 
     def outputs(self):
         """Use specific ports if defined, otherwise return bidirectional ports"""
-        return self.library.render(
-            self.library.infer(
-                self.ports_schema()))
+        return translate_ports(
+            self.core,
+            self.ports_schema())
 
-        # return translate_ports(
-        #     self.ports_schema(),
-        #     name=self.name)
-    
     def initial_state(self):
         return collapse_defaults(self.input_port_data)
     
     def update(self, state, interval):
+        import ipdb; ipdb.set_trace()
         return self.next_update(interval, state)
 
 
-def update_inheritance(cls, new_base, library, core):
+def update_inheritance(cls, new_base, core):
     if new_base in cls.__bases__:
         return
 
@@ -151,11 +118,10 @@ def update_inheritance(cls, new_base, library, core):
     init = cls.__init__
 
     core = core
-    library = library
 
     # wrap the existing init with an init that accepts arguments
     # specific to process-bigraph
-    def new_init(self, config=None, parameters=None, core=core):
+    def new_init(self, config=None, core=core, parameters=None):
         config = config or parameters
         parameters = parameters or config
         core = core
@@ -169,10 +135,9 @@ def update_inheritance(cls, new_base, library, core):
 
         new_base.__init__(
             self,
-            config,
-            parameters,
-            core=core,
-            library=library)
+            config=config,
+            parameters=parameters,
+            core=core)
 
     # replace the existing init with the new init
     cls.__init__ = new_init
@@ -211,16 +176,25 @@ def scan_processes(path):
     return scan
 
 
-def update_processes(library, core, processes):
+def update_processes(core, processes):
     for process_name, process in processes.get('processes', {}).items():
-        update_inheritance(process, OmniProcess, library, core)
+        update_inheritance(process, OmniProcess, core)
         process.core = core
-        core.register_process(process_name, process)
+        core.register_link(process_name, process)
 
     for step_name, step in processes.get('steps', {}).items():
-        update_inheritance(step, OmniStep, library, core)
+        update_inheritance(step, OmniStep, core)
         step.core = core
-        core.register_process(step_name, step)
+        core.register_link(step_name, step)
+
+    return core
+
+
+def scan_update(core, path):
+    processes = scan_processes(path)
+    core = update_processes(
+        core,
+        processes)
 
     return core
 
@@ -235,27 +209,26 @@ def list_paths(path):
         return result
 
 
-# TODO: ask Sean where the units are?
-#   ie cell density?
-
-def translate_processes(library, core, tree, topology=None):
+def translate_processes(core, tree, topology=None):
     if isinstance(tree, BigraphEdge):
         cls = type(tree)
 
-        tree.library = library
+        tree.core = core
 
         if not hasattr(tree, '_config'):
             tree._config = tree.parameters
 
         if not hasattr(cls, 'config_schema') or not cls.config_schema:
-            inferred_schema = library.infer(tree.config)
-            cls.config_schema = library.render(inferred_schema)
+            inferred_schema = core.infer(tree.config)
+            cls.config_schema = core.render(inferred_schema)
 
         type_name = 'step'
         state = {}
         if isinstance(tree, BigraphProcess):
             type_name = 'process'
             state['interval'] = 1.0
+        else:
+            state['priority'] = 1.0
 
         if topology is None:
             topology = tree.topology
@@ -272,7 +245,6 @@ def translate_processes(library, core, tree, topology=None):
         # config_schema = infer(tree.parameters)
 
         config = translate_processes(
-            library,
             core,
             tree.parameters)
 
@@ -282,11 +254,9 @@ def translate_processes(library, core, tree, topology=None):
             'config': config,
             '_inputs': tree.inputs(),
             '_outputs': tree.outputs(),
+            'instance': tree,
             'inputs': wires,
             'outputs': wires})
-
-            # 'outputs': wires,
-            # 'instance': tree})
 
         return state
 
@@ -294,7 +264,6 @@ def translate_processes(library, core, tree, topology=None):
         result = {}
         for key, subtree in tree.items():
             result[key] = translate_processes(
-                library,
                 core,
                 subtree,
                 topology[key] if topology else None)
@@ -305,15 +274,13 @@ def translate_processes(library, core, tree, topology=None):
         return tree
 
 
-def migrate_composite(library, core, sim):
+def migrate_composite(core, sim):
     processes = translate_processes(
-        library,
         core,
         sim.ecoli.processes,
         sim.ecoli.topology)
 
     steps = translate_processes(
-        library,
         core,
         sim.ecoli.steps,
         sim.ecoli.topology)

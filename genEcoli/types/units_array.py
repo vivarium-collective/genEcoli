@@ -1,9 +1,11 @@
+import numpy as np
 import typing
+
 from plum import dispatch
 from dataclasses import dataclass, is_dataclass, field
 
-from bigraph_schema.schema import Node, Integer, Dtype, Array
-from bigraph_schema.methods import infer, set_default, serialize, deserialize, render, wrap_default
+from bigraph_schema.schema import Node, Integer, Array
+from bigraph_schema.methods import infer, set_default, serialize, realize, render, wrap_default
 
 from genEcoli.types.unum import Unum
 
@@ -19,13 +21,13 @@ class UnitsArray(Node):
 @infer.dispatch
 def infer(core, value: UnitStructArray, path: tuple = ()):
     data = {
-        'struct': infer(core, value.struct_array, path=path + ('struct',)),
-        'units': infer(core, value.units, path=path + ('units',))}
+        'struct': infer(core, value.struct_array, path=path + ('struct',))[0],
+        'units': infer(core, value.units, path=path + ('units',))[0]}
 
     schema = UnitsArray(**data)
     schema = set_default(schema, value)
 
-    return schema
+    return schema, []
 
 
 @serialize.dispatch
@@ -40,25 +42,27 @@ def serialize(schema: UnitsArray, state):
     return encode
 
 
-@deserialize.dispatch
-def deserialize(schema: UnitsArray, encode):
+@realize.dispatch
+def realize(core, schema: UnitsArray, encode, path=()):
     if isinstance(encode, UnitStructArray):
-        return encode
+        return schema, encode, []
     else:
         inner = tuple(
-            deserialize(
+            realize(
+                core,
                 getattr(schema, key),
-                encode[key])
-            for key in ['struct', 'units']),
+                encode[key],
+                path+(key,))[1]
+            for key in ['struct', 'units'])
 
-        return UnitStructArray(
-            *inner)
+        return schema, UnitStructArray(
+            *inner), []
 
 @render.dispatch
-def render(schema: UnitsArray):
+def render(schema: UnitsArray, defaults=False):
     data = {
         'struct': render(schema.struct),
         'units': render(schema.units)}
 
-    return wrap_default(schema, data)
+    return wrap_default(schema, data) if defaults else data
     
