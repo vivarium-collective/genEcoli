@@ -25,3 +25,4 @@ reconstruction/
 .python-version
 out/
 .idea
+.env

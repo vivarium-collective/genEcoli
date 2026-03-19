@@ -1,23 +1,29 @@
 from pathlib import Path
+import datetime
+import warnings
+from pathlib import Path
+from urllib import parse
 
-from ecoli.library.schema import not_a_process
+from bigraph_schema.core import Core
+from process_bigraph import allocate_core
 from process_bigraph import Composite
 from process_bigraph import Process as PbgProcess
 from vivarium.core.engine import Engine
 
-from processes import core
-from processes.data_manager import EcoliDataManager
+from .ecoli_types import ECOLI_TYPES as ECOLI_TYPES_REPRESENTATION
+from ecoli.experiments.ecoli_master_sim import EcoliSim, SimConfig
+from ecoli.library.schema import not_a_process
 
 
 class VEcoliProcess(PbgProcess):
     config_schema = {"config_path": "string"}
 
     def initialize(self, config):
-        self.simulation = EcoliDataManager.initialize_ecoli(config_path=config["config_path"])
+        self.simulation = initialize_simulation(config_path=config["config_path"])
         self.t = 0
 
     def initial_state(self):
-        y_0: dict = self.simulation.ecoli_experiment.state.get_value(condition=not_a_process)["agents"]["0"]
+        y_0: dict = query_simulation(sim=self.simulation)  # self.simulation.ecoli_experiment.state.get_value(condition=not_a_process)["agents"]["0"]
         return {
             "exchange": y_0["environment"]["exchange"],
             "mass": y_0["listeners"]["mass"],
@@ -50,7 +56,119 @@ class VEcoliProcess(PbgProcess):
         return {"exchange": y_i["environment"]["exchange"], "mass": y_i["listeners"]["mass"], "t": self.t}
 
 
-core.register_link("vecoli-process", VEcoliProcess)
+def initialize_simulation(config_path: str | None = None, sim_config: SimConfig | None = None) -> EcoliSim:
+    simulation: EcoliSim = _create_simulation(config_path=config_path, config=sim_config)
+    # validate initialization
+    if simulation.ecoli is None:
+        raise RuntimeError(
+            "Build the composite by calling build_ecoli() \
+            before calling run()."
+        )
+
+    # initialize experiment config
+    metadata = simulation.get_metadata()
+    metadata["output_metadata"] = simulation.output_metadata()
+
+    # make the experiment
+    if isinstance(simulation.emitter, str):
+        simulation.emitter_config = {"type": simulation.emitter}
+        if simulation.emitter_arg is not None:
+            for key, value in simulation.emitter_arg.items():
+                simulation.emitter_config[key] = value
+        if simulation.emitter == "parquet":
+            raise RuntimeError("You cannot specify a parquet emitter for now...")
+
+    experiment_config = {
+        "description": simulation.description,
+        "metadata": metadata,
+        "processes": simulation.ecoli.processes,
+        "steps": simulation.ecoli.steps,
+        "flow": simulation.ecoli.flow,
+        "topology": simulation.ecoli.topology,
+        "initial_state": simulation.generated_initial_state,
+        "progress_bar": simulation.progress_bar,
+        "emit_topology": simulation.emit_topology,
+        "emit_processes": simulation.emit_processes,
+        "emit_config": simulation.emit_config,
+        "emitter": simulation.emitter_config,
+        "initial_global_time": simulation.initial_global_time,
+    }
+
+    if simulation.experiment_id:
+        # Store backup of base experiment ID,
+        # in case multiple experiments are run in a row
+        # with suffix_time = True.
+        if not simulation.experiment_id_base:
+            simulation.experiment_id_base = simulation.experiment_id
+        if simulation.suffix_time:
+            simulation.experiment_id = datetime.now().strftime(f"{simulation.experiment_id_base}_%Y%m%d-%H%M%S")
+        # Special characters can break Hive partitioning so do not allow them
+        if simulation.experiment_id != parse.quote_plus(simulation.experiment_id):
+            raise TypeError(
+                "Experiment ID cannot contain special characters"
+                f"that change the string when URL quoted: {simulation.experiment_id}"
+                f" != {parse.quote_plus(simulation.experiment_id)}"
+            )
+        experiment_config["experiment_id"] = simulation.experiment_id
+
+    experiment_config["profile"] = simulation.profile
+
+    # configure Engine
+    # Since unique numpy updater is an class method, internal
+    # deepcopying in vivarium-core causes this warning to appear
+    warnings.filterwarnings(
+        "ignore",
+        message="Incompatible schema "
+        "assignment at .+ Trying to assign the value <bound method "
+        r"UniqueNumpyUpdater\.updater .+ to key updater, which already "
+        r"has the value <bound method UniqueNumpyUpdater\.updater",
+    )
+    simulation.ecoli_experiment = Engine(**experiment_config)
+    # Only emit designated stores if specified
+    if simulation.config["emit_paths"]:
+        simulation.ecoli_experiment.state.set_emit_values([tuple()], False)
+        simulation.ecoli_experiment.state.set_emit_values(
+            simulation.config["emit_paths"],
+            True,
+        )
+    # Clean up unnecessary references
+    # self.generated_initial_state = None
+    # self.ecoli_experiment.initial_state = None
+    # del metadata, experiment_config
+    # self.ecoli = None
+    return simulation
+
+
+def query_simulation(sim: EcoliSim):
+    return sim.ecoli_experiment.state.get_value(condition=not_a_process)["agents"]["0"]
+
+
+def _create_simulation(
+    config_path: str | None = None,
+    config: SimConfig | None = None,
+    **config_overrides
+) -> EcoliSim:
+    def _new_ecoli(config, config_path):
+        if config_path is not None:
+            if not Path(config_path).exists():
+                raise ValueError(f"You must pass a valid config path, not: {config_path}")
+            return EcoliSim.from_file(filepath=config_path)
+        if config is not None:
+            return EcoliSim(config.to_dict())
+        return None
+
+    sim: EcoliSim | None = _new_ecoli(config=config, config_path=config_path)
+    if sim is None:
+        raise RuntimeError("You must pass either a valid config path or config instance")
+
+    # parameterize sim config
+    if len(config_overrides):
+        sim.config.update(config_overrides)
+
+    # build vivarium ecoli
+    sim.build_ecoli()
+    print("Ecoli has been built!")
+    return sim
 
 
 def test_vecoli_composition() -> None:
@@ -116,3 +234,18 @@ def test_vecoli_composition() -> None:
         "mass_e2",
         "t_e2",
     ]
+
+
+def get_core() -> Core:
+    return allocate_core()
+
+
+def initialize_core() -> Core:
+    c = get_core()
+    c.register_types(ECOLI_TYPES_REPRESENTATION)
+    c.register_link("vecoli-process", VEcoliProcess)
+    return c
+
+
+core = initialize_core()
+
