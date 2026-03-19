@@ -1,31 +1,13 @@
-import xarray as xr
-from process_bigraph import Process as PbgProcess, Composite, ProcessTypes
-import numpy as np
-from vivarium.core.engine import Engine
-from vivarium.core.composer import deep_merge
-from vivarium.core.process import Process
-from vivarium.core.serialize import deserialize_value, serialize_value
-from vivarium.library.dict_utils import deep_merge_check
-from vivarium.library.topology import inverse_topology
-from vivarium.library.topology import assoc_path
+import datetime
+import warnings
+from pathlib import Path
+from urllib import parse
 
-from ecoli.library.logging_tools import write_json
-from ecoli.experiments.ecoli_master_sim import EcoliSim, report_profiling, TimeLimitError, SimConfig
+from ecoli.experiments.ecoli_master_sim import EcoliSim, SimConfig
 
 # Environment composer for spatial environment sim
-import ecoli.composites.environment.lattice
 from ecoli.library.schema import not_a_process
-import datetime
-import gc
-import json
-import warnings
-from functools import partial
-from typing import Any
-from urllib import parse
-import pickle
 from vivarium.core.engine import Engine
-
-from pathlib import Path
 
 
 class EcoliDataManager:
@@ -54,9 +36,7 @@ class EcoliDataManager:
                 for key, value in self.emitter_arg.items():
                     self.emitter_config[key] = value
             if self.emitter == "parquet":
-                raise RuntimeError(
-                    "You cannot specify a parquet emitter for now..."
-                )
+                raise RuntimeError("You cannot specify a parquet emitter for now...")
         experiment_config = {
             "description": self.description,
             "metadata": metadata,
@@ -79,9 +59,7 @@ class EcoliDataManager:
             if not self.experiment_id_base:
                 self.experiment_id_base = self.experiment_id
             if self.suffix_time:
-                self.experiment_id = datetime.now().strftime(
-                    f"{self.experiment_id_base}_%Y%m%d-%H%M%S"
-                )
+                self.experiment_id = datetime.now().strftime(f"{self.experiment_id_base}_%Y%m%d-%H%M%S")
             # Special characters can break Hive partitioning so do not allow them
             if self.experiment_id != parse.quote_plus(self.experiment_id):
                 raise TypeError(
@@ -98,9 +76,9 @@ class EcoliDataManager:
         warnings.filterwarnings(
             "ignore",
             message="Incompatible schema "
-                    "assignment at .+ Trying to assign the value <bound method "
-                    r"UniqueNumpyUpdater\.updater .+ to key updater, which already "
-                    r"has the value <bound method UniqueNumpyUpdater\.updater",
+            "assignment at .+ Trying to assign the value <bound method "
+            r"UniqueNumpyUpdater\.updater .+ to key updater, which already "
+            r"has the value <bound method UniqueNumpyUpdater\.updater",
         )
         self.ecoli_experiment = Engine(**experiment_config)
         # Only emit designated stores if specified
@@ -118,11 +96,13 @@ class EcoliDataManager:
         return self
 
     @classmethod
-    def new_simulation(cls, config_path: str | None = None, config: SimConfig | None = None, **config_overrides) -> EcoliSim:
+    def new_simulation(
+        cls, config_path: str | None = None, config: SimConfig | None = None, **config_overrides
+    ) -> EcoliSim:
         def getsim(config, config_path):
             if config_path is not None:
                 if not Path(config_path).exists():
-                    raise ValueError(f'You must pass a valid config path, not: {config_path}')
+                    raise ValueError(f"You must pass a valid config path, not: {config_path}")
                 return EcoliSim.from_file(filepath=config_path)
             if config is not None:
                 return EcoliSim(config.to_dict())
@@ -138,5 +118,5 @@ class EcoliDataManager:
 
         # build vivarium ecoli
         sim.build_ecoli()
-        print('Ecoli has been built!')
+        print("Ecoli has been built!")
         return sim

@@ -1,19 +1,22 @@
-from process_bigraph import ProcessTypes
+from process_bigraph import allocate_core
+from bigraph_schema.core import Core
 
 from .ecoli_types import ECOLI_TYPES as ECOLI_TYPES_REPRESENTATION
 
 
-def register_types(core: ProcessTypes):
-    core._register_types(
-        ECOLI_TYPES_REPRESENTATION)
-
-    return core
+def get_core() -> Core:
+    return allocate_core()
 
 
-def initialize_core():
-    core = ProcessTypes()
-    return register_types(core)
+def register_types(c: Core) -> Core:
+    c.register_types(ECOLI_TYPES_REPRESENTATION)
+    return c
 
 
-core = initialize_core()
+def initialize_core() -> Core:
+    c = get_core()
+    return register_types(c)
 
+
+# core = initialize_core()
+core = get_core()
