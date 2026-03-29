@@ -91,6 +91,13 @@ def apply_step_update(cell_state, edge, instance, delta):
             continue
 
         wire_path = output_wires.get(port_name)
+        if wire_path is None:
+            continue
+
+        if isinstance(wire_path, dict):
+            _apply_nested_wire_update(cell_state, wire_path, update_value)
+            continue
+
         if not isinstance(wire_path, list) or not wire_path:
             continue
 
@@ -289,7 +296,11 @@ def extract_defaults(schema):
             if '_default' in value:
                 default = value['_default']
                 # Skip empty/falsy defaults that would overwrite real state
-                if default is not None and default != [] and default != {} and default != ():
+                try:
+                    is_empty = default is None or (isinstance(default, (list, dict, tuple)) and len(default) == 0)
+                except (TypeError, ValueError):
+                    is_empty = False
+                if not is_empty:
                     result[key] = default
             else:
                 sub = extract_defaults(value)
@@ -650,24 +661,90 @@ def _inject_nested_defaults(state, wire_path, port_schema):
                 _inject_nested_defaults(target, [key], value)
 
 
+def _apply_nested_wire_update(cell_state, wire_dict, update_value):
+    """Apply an update through a nested wire dict (v1 nested topology).
+
+    For wire_dict like {'_path': ['environment'], 'exchange': ['exchange']},
+    writes update_value's sub-keys to the appropriate state paths."""
+    if not isinstance(update_value, dict):
+        base_path = wire_dict.get('_path')
+        if base_path and isinstance(base_path, list):
+            _set_at_path(cell_state, base_path, update_value)
+        return
+
+    base_path = wire_dict.get('_path')
+    for sub_key, sub_value in update_value.items():
+        sub_wire = wire_dict.get(sub_key)
+        if sub_wire is not None:
+            if isinstance(sub_wire, list):
+                _set_at_path(cell_state, sub_wire, sub_value)
+            elif isinstance(sub_wire, dict):
+                _apply_nested_wire_update(cell_state, sub_wire, sub_value)
+        elif base_path and isinstance(base_path, list):
+            _set_at_path(cell_state, base_path + [sub_key], sub_value)
+
+
+def _set_at_path(state, path, value):
+    """Set a value at a path in a nested dict, merging dicts."""
+    target = state
+    for segment in path[:-1]:
+        if isinstance(target, dict):
+            if segment not in target:
+                target[segment] = {}
+            target = target[segment]
+        else:
+            return
+    if isinstance(target, dict) and path:
+        key = path[-1]
+        current = target.get(key)
+        if isinstance(value, dict) and isinstance(current, dict):
+            _deep_update(current, value)
+        else:
+            target[key] = value
+
+
+def _resolve_wire(cell_state, wire_path):
+    """Resolve a wire path to a value in cell_state. Returns None if not found."""
+    if isinstance(wire_path, list) and wire_path:
+        current = cell_state
+        for segment in wire_path:
+            if isinstance(current, dict):
+                current = current.get(segment)
+            else:
+                return None
+        return current
+    elif isinstance(wire_path, dict):
+        import copy
+        base_path = wire_path.get('_path')
+        if base_path:
+            result = _resolve_wire(cell_state, base_path)
+            if result is not None and isinstance(result, dict):
+                result = copy.copy(result)
+            else:
+                result = {}
+        else:
+            result = {}
+        for sub_key, sub_path in wire_path.items():
+            if sub_key == '_path':
+                continue
+            sub_val = _resolve_wire(cell_state, sub_path)
+            if sub_val is not None:
+                result[sub_key] = sub_val
+        return result
+    return None
+
+
 def _build_view(cell_state, edge, instance):
     """Build a state view for a step by following its input wires."""
     ports = instance.ports_schema()
     view = {}
     wires = edge.get('inputs', {})
     for port_name, wire_path in wires.items():
-        if isinstance(wire_path, list) and wire_path:
-            current = cell_state
-            for segment in wire_path:
-                if isinstance(current, dict):
-                    current = current.get(segment)
-                else:
-                    current = None
-                    break
-            if current is not None:
-                view[port_name] = current
-            elif port_name in ports and isinstance(ports[port_name], dict) and '_default' in ports[port_name]:
-                view[port_name] = ports[port_name]['_default']
+        resolved = _resolve_wire(cell_state, wire_path)
+        if resolved is not None:
+            view[port_name] = resolved
+        elif port_name in ports and isinstance(ports[port_name], dict) and '_default' in ports[port_name]:
+            view[port_name] = ports[port_name]['_default']
     return view
 
 
