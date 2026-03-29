@@ -19,7 +19,7 @@ from wholecell.utils.filepath import ROOT_PATH
 from ecoli.composites.ecoli_master import run_ecoli
 from ecoli.experiments.ecoli_master_sim import EcoliSim, CONFIG_DIR_PATH
 
-from genEcoli import update_inheritance, scan_processes, update_processes, migrate_composite, OmniStep, OmniProcess, scan_update
+from genEcoli import update_inheritance, scan_processes, update_processes, migrate_composite, OmniStep, OmniProcess, scan_update, run_ecoli_sim
 from genEcoli.types import find_units, ECOLI_TYPES
 
 class TestStep(VivariumStep):
@@ -172,14 +172,20 @@ def test_generate_migration(core):
             migrate,
             migrate_file)
 
-    return migrate
+    return migrate, sim
 
-def test_run_ecoli(core, migrate=None):
+def test_run_ecoli(core, migrate=None, sim=None):
     os.makedirs('out', exist_ok=True)
 
     if migrate is None:
         with open("out/migrate.pickle", 'rb') as migrate_file:
             migrate = pickle.load(migrate_file)
+
+    if sim is None:
+        with chdir(ROOT_PATH):
+            filename = 'default'
+            sim = EcoliSim.from_file(CONFIG_DIR_PATH + filename + ".json")
+            sim.build_ecoli()
 
     inferred = core.infer(migrate)
 
@@ -194,19 +200,16 @@ def test_run_ecoli(core, migrate=None):
         core=core)
     Composite.run_steps = original_run_steps
 
-    document = {
-        'schema': core.render(inferred),
-        'state': core.serialize(inferred, migrate)}
+    bulk_before = ecoli.state['agents']['0']['bulk']['count'].copy()
 
-    with open('out/ecoli-composite.json', 'w') as document_file:
-        json.dump(
-            document,
-            document_file,
-            indent=2,
-            cls=Encoder,
-            skipkeys=True)
+    run_ecoli_sim(ecoli, sim.ecoli.flow, 10.0)
 
-    ecoli.run(10.0)
+    bulk_after = ecoli.state['agents']['0']['bulk']['count']
+    changed = (bulk_before != bulk_after).sum()
+    print(f"global_time: {ecoli.state['global_time']}")
+    print(f"bulk molecules changed: {changed} / {len(bulk_before)}")
+    assert ecoli.state['global_time'] == 10.0, f"Expected global_time=10.0, got {ecoli.state['global_time']}"
+    assert changed > 0, "No bulk molecule counts changed — simulation did not produce results"
 
 
 def initialize_tests():
@@ -240,8 +243,8 @@ if __name__ == '__main__':
     # test_run_ecoli(core)
 
     if not Path('out/migrate.pickle').exists():
-        migrate = test_generate_migration(core)
-        test_run_ecoli(core, migrate=migrate)
+        migrate, sim = test_generate_migration(core)
+        test_run_ecoli(core, migrate=migrate, sim=sim)
 
     else:
         test_run_ecoli(core)

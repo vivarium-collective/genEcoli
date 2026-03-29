@@ -69,6 +69,193 @@ def _deep_update(target, source):
             target[key] = value
 
 
+def apply_step_update(cell_state, edge, instance, delta):
+    """Apply a step's delta update to cell_state by following output wire paths.
+
+    Unlike apply_v1_update_in_place (which modifies a view dict), this writes
+    directly into cell_state via output wires, so scalar replacements propagate."""
+    import numpy as np
+
+    try:
+        ports = instance.ports_schema()
+    except Exception:
+        return
+
+    output_wires = edge.get('outputs', {})
+
+    for port_name, update_value in delta.items():
+        if port_name.startswith('_flow_'):
+            continue
+
+        if update_value == {"update": True}:
+            continue
+
+        wire_path = output_wires.get(port_name)
+        if not isinstance(wire_path, list) or not wire_path:
+            continue
+
+        port = ports.get(port_name, {})
+        updater = port.get('_updater') if isinstance(port, dict) else None
+
+        target = cell_state
+        for segment in wire_path[:-1]:
+            if isinstance(target, dict):
+                if segment not in target:
+                    target[segment] = {}
+                target = target[segment]
+            else:
+                target = None
+                break
+
+        if not isinstance(target, dict):
+            continue
+
+        key = wire_path[-1]
+
+        if updater == 'set' or port_name in ('next_update_time', 'process'):
+            target[key] = update_value
+        elif callable(updater):
+            current = target.get(key)
+            if current is not None:
+                import numpy as np
+                if isinstance(current, np.ndarray):
+                    try:
+                        current.flags.writeable = True
+                    except ValueError:
+                        current = current.copy()
+                        current.flags.writeable = True
+                        target[key] = current
+                updater(current, update_value)
+        elif isinstance(update_value, dict):
+            current = target.get(key)
+            if isinstance(current, dict):
+                _deep_update(current, update_value)
+            else:
+                target[key] = update_value
+        elif isinstance(update_value, (int, float)):
+            current = target.get(key)
+            if isinstance(current, (int, float)):
+                target[key] = current + update_value
+            else:
+                target[key] = update_value
+        elif update_value is not None:
+            target[key] = update_value
+
+
+def run_ecoli_sim(composite, flow, interval, timestep=1.0):
+    """Run the E. coli simulation using the v1 flow execution model.
+
+    Instead of relying on v2's Composite.run() trigger system, this executes
+    all steps in v1 flow order every timestep — matching vEcoli's original
+    execution model exactly.
+
+    Args:
+        composite: A v2 Composite holding the migrated state.
+        flow: The v1 flow dict (sim.ecoli.flow) defining step execution order.
+        interval: Total simulated time to run.
+        timestep: Time per step (default 1.0s, matching v1).
+    """
+    inner_flow = None
+    cell_path = None
+    for path_key in flow:
+        subflow = flow[path_key]
+        if isinstance(subflow, dict):
+            for subkey in subflow:
+                if isinstance(subflow[subkey], dict) and subflow[subkey]:
+                    inner_flow = subflow[subkey]
+                    cell_path = (path_key, subkey)
+                    break
+        if inner_flow:
+            break
+
+    if inner_flow is None:
+        raise ValueError("Could not find flow order in flow dict")
+
+    step_order = list(inner_flow.keys())
+    cell_state = composite.state[cell_path[0]][cell_path[1]]
+
+    _make_arrays_writeable(cell_state)
+    _disable_readonly_arrays()
+
+    num_steps = int(interval / timestep)
+    for t in range(num_steps):
+        for step_name in step_order:
+            _make_arrays_writeable(cell_state)
+            edge = cell_state.get(step_name)
+            if not isinstance(edge, dict) or 'instance' not in edge:
+                continue
+
+            instance = edge['instance']
+            if not hasattr(instance, 'next_update'):
+                continue
+
+            try:
+                view = _build_view(cell_state, edge, instance)
+                view = fill_missing_state(view, instance)
+                step_ts = instance.parameters.get('timestep', timestep)
+                delta = instance.next_update(step_ts, view)
+                if delta:
+                    apply_step_update(cell_state, edge, instance, delta)
+            except Exception as e:
+                print(f"Step {step_name} failed at t={t}: {type(e).__name__}: {e}")
+
+        composite.state['global_time'] += timestep
+        if 'global_time' in cell_state:
+            cell_state['global_time'] = composite.state['global_time']
+
+
+def _make_arrays_writeable(state):
+    """Recursively make all numpy arrays in the state writeable."""
+    import numpy as np
+    if isinstance(state, dict):
+        for key, value in state.items():
+            if isinstance(value, np.ndarray):
+                if not value.flags.writeable:
+                    state[key] = value.copy()
+                    state[key].flags.writeable = True
+            elif hasattr(value, 'struct_array'):
+                arr = value.struct_array
+                if isinstance(arr, np.ndarray) and not arr.flags.writeable:
+                    value.struct_array = arr.copy()
+                    value.struct_array.flags.writeable = True
+            elif hasattr(value, 'flags') and hasattr(value.flags, 'writeable'):
+                if not value.flags.writeable:
+                    try:
+                        value.flags.writeable = True
+                    except ValueError:
+                        state[key] = value.copy()
+            elif isinstance(value, dict):
+                _make_arrays_writeable(value)
+
+
+def _disable_readonly_arrays():
+    """Monkey-patch bulk_numpy_updater to not set arrays read-only.
+
+    In v1, arrays are made read-only between steps as a safety measure.
+    In our custom loop, this causes failures when the next step tries to
+    modify the same array. We patch the updater to skip the read-only flag."""
+    from ecoli.library.schema import bulk_numpy_updater
+    import functools
+
+    if hasattr(bulk_numpy_updater, '_patched'):
+        return
+
+    @functools.wraps(bulk_numpy_updater)
+    def writeable_updater(current, update):
+        current.flags.writeable = True
+        for idx, value in update:
+            current["count"][idx] += value
+        return current
+
+    writeable_updater._patched = True
+
+    import ecoli.library.schema as schema_mod
+    schema_mod.bulk_numpy_updater = writeable_updater
+
+    from ecoli.library import schema as schema_lib
+    schema_lib.bulk_numpy_updater = writeable_updater
+
+
 def fill_missing_state(state, process):
     """Fill in missing state keys with defaults from ports_schema."""
     try:
@@ -79,8 +266,13 @@ def fill_missing_state(state, process):
     for key, port in ports.items():
         if key.startswith('_'):
             continue
-        if key not in state and isinstance(port, dict) and '_default' in port:
-            state[key] = port['_default']
+        if key not in state and isinstance(port, dict):
+            if '_default' in port:
+                state[key] = port['_default']
+            else:
+                defaults = extract_defaults(port)
+                if defaults:
+                    state[key] = defaults
 
     return state
 

@@ -10,7 +10,7 @@ from ecoli.library.schema import (
 )
 
 
-from genEcoli.interface import OmniStep, OmniProcess, update_inheritance, scan_processes, update_processes, migrate_composite, scan_update
+from genEcoli.interface import OmniStep, OmniProcess, update_inheritance, scan_processes, update_processes, migrate_composite, scan_update, run_ecoli_sim
 from genEcoli.types import ECOLI_TYPES
 
 
