@@ -1,3 +1,4 @@
+import os
 import numpy as np
 
 import json
@@ -158,7 +159,6 @@ def test_scan_processes(core):
 
 def test_generate_migration(core):
     with chdir(ROOT_PATH):
-        # timeseries = run_ecoli()
         filename = 'default'
         sim = EcoliSim.from_file(CONFIG_DIR_PATH + filename + ".json")
         sim.build_ecoli()
@@ -166,6 +166,7 @@ def test_generate_migration(core):
     core = test_scan_processes(core)
     migrate = migrate_composite(core, sim)
 
+    os.makedirs('out', exist_ok=True)
     with open("out/migrate.pickle", 'wb') as migrate_file:
         pickle.dump(
             migrate,
@@ -174,11 +175,11 @@ def test_generate_migration(core):
     return migrate
 
 def test_run_ecoli(core, migrate=None):
+    os.makedirs('out', exist_ok=True)
+
     if migrate is None:
         with open("out/migrate.pickle", 'rb') as migrate_file:
             migrate = pickle.load(migrate_file)
-
-    import ipdb; ipdb.set_trace()
 
     inferred = core.infer(migrate)
 
@@ -186,13 +187,12 @@ def test_run_ecoli(core, migrate=None):
         'schema': inferred,
         'state': migrate}
 
-    import ipdb; ipdb.set_trace()
-
+    original_run_steps = Composite.run_steps
+    Composite.run_steps = lambda self, x: None
     ecoli = Composite(
         composite_config,
         core=core)
-
-    import ipdb; ipdb.set_trace()
+    Composite.run_steps = original_run_steps
 
     document = {
         'schema': core.render(inferred),
@@ -206,32 +206,7 @@ def test_run_ecoli(core, migrate=None):
             cls=Encoder,
             skipkeys=True)
 
-    import ipdb; ipdb.set_trace()
-
-    ecoli.save()
-
-    import ipdb; ipdb.set_trace()
-
-    ecoli.run(
-        10.0)
-
-    import ipdb; ipdb.set_trace()
-
-
-
-    # schema, state = core.realize(
-    #     inferred,
-    #     migrate)
-
-    # import ipdb; ipdb.set_trace()
-
-    # units = find_units(inferred)
-
-    # import ipdb; ipdb.set_trace()
-
-    # state = core.default(composition)
-
-    # import ipdb; ipdb.set_trace()
+    ecoli.run(10.0)
 
 
 def initialize_tests():

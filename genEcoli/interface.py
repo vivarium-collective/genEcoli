@@ -1,4 +1,3 @@
-from abc import abstractmethod
 import inspect
 import copy
 
@@ -20,7 +19,91 @@ __all__ = [
 ]
 
 class Revert:
-    pass 
+    pass
+
+
+def apply_v1_update_in_place(process, state, delta):
+    """Apply v1 updates directly to the state dict (which references composite state).
+
+    The state dict from core.view() contains references to the actual composite
+    state objects (numpy arrays etc). We modify them in place and return empty
+    update so v2's apply is a no-op."""
+    import numpy as np
+
+    if not delta:
+        return
+
+    try:
+        ports = process.ports_schema()
+    except Exception:
+        return
+
+    for key, update_value in delta.items():
+        port = ports.get(key, {})
+        updater = port.get('_updater') if isinstance(port, dict) else None
+
+        current = state.get(key)
+
+        if updater == 'set' or key in ('next_update_time', 'process'):
+            state[key] = update_value
+        elif callable(updater):
+            if current is not None:
+                try:
+                    updater(current, update_value)
+                except Exception:
+                    state[key] = update_value
+        elif isinstance(update_value, dict) and isinstance(current, dict):
+            _deep_update(current, update_value)
+        elif isinstance(update_value, (int, float)) and isinstance(current, (int, float)):
+            state[key] = current + update_value
+        elif update_value is not None:
+            state[key] = update_value
+
+
+def _deep_update(target, source):
+    """Recursively update target dict with source dict."""
+    for key, value in source.items():
+        if key in target and isinstance(target[key], dict) and isinstance(value, dict):
+            _deep_update(target[key], value)
+        else:
+            target[key] = value
+
+
+def fill_missing_state(state, process):
+    """Fill in missing state keys with defaults from ports_schema."""
+    try:
+        ports = process.ports_schema()
+    except Exception:
+        return state
+
+    for key, port in ports.items():
+        if key.startswith('_'):
+            continue
+        if key not in state and isinstance(port, dict) and '_default' in port:
+            state[key] = port['_default']
+
+    return state
+
+
+def extract_defaults(schema):
+    """Recursively extract non-empty _default values from a v1 ports_schema dict."""
+    result = {}
+    if not isinstance(schema, dict):
+        return result
+    for key, value in schema.items():
+        if key.startswith('_'):
+            continue
+        if isinstance(value, dict):
+            if '_default' in value:
+                default = value['_default']
+                # Skip empty/falsy defaults that would overwrite real state
+                if default is not None and default != [] and default != {} and default != ():
+                    result[key] = default
+            else:
+                sub = extract_defaults(value)
+                if sub:
+                    result[key] = sub
+    return result
 
 
 class Resolver(BigraphStep):
@@ -36,41 +119,6 @@ class Resolver(BigraphStep):
 class OmniStep(BigraphStep):
     """This class allows v1 steps to run as v2 steps"""
 
-    config_schema = {} 
-    _ports = {
-        "inputs": [],
-        "outputs": []
-    }
-
-    def __init__(self, parameters=None, config=None, core=None) -> None:
-        parameters = parameters or config
-        config = config or parameters
-
-        super().__init__(
-            config=config,
-            core=core)
-
-    def inputs(self):
-        return translate_ports(
-            self.core,
-            self.ports_schema())
-
-    def outputs(self):
-        return translate_ports(
-            self.core,
-            self.ports_schema())
-
-    def initial_state(self):
-        # TODO
-        return {}
-    
-    @abstractmethod
-    def update(self, state):
-        return {}
-
-
-class OmniProcess(BigraphProcess):
-    # This class allows v1 processes to run as v2 processes
     config_schema = {}
     _ports = {
         "inputs": [],
@@ -86,52 +134,86 @@ class OmniProcess(BigraphProcess):
             core=core)
 
     def inputs(self):
-        """Expects:
-        self.input_port_data = {port_name: {_default: ...}}
-        """
         return translate_ports(
             self.core,
             self.ports_schema())
 
     def outputs(self):
-        """Use specific ports if defined, otherwise return bidirectional ports"""
         return translate_ports(
             self.core,
             self.ports_schema())
 
-    def initial_state(self):
-        return collapse_defaults(self.input_port_data)
-    
+    def initial_state(self, config=None):
+        return {}
+
+    def update(self, state, interval=None):
+        if hasattr(self, 'next_update'):
+            timestep = interval if interval and interval > 0 else self.parameters.get('timestep', 1.0)
+            state = fill_missing_state(state, self)
+            delta = self.next_update(timestep, state)
+            apply_v1_update_in_place(self, state, delta)
+        return {}
+
+
+class OmniProcess(BigraphProcess):
+    """This class allows v1 processes to run as v2 processes"""
+    config_schema = {}
+    _ports = {
+        "inputs": [],
+        "outputs": []
+    }
+
+    def __init__(self, parameters=None, config=None, core=None) -> None:
+        parameters = parameters or config
+        config = config or parameters
+
+        super().__init__(
+            config=config,
+            core=core)
+
+    def inputs(self):
+        return translate_ports(
+            self.core,
+            self.ports_schema())
+
+    def outputs(self):
+        return translate_ports(
+            self.core,
+            self.ports_schema())
+
+    def initial_state(self, config=None):
+        return {}
+
     def update(self, state, interval):
-        import ipdb; ipdb.set_trace()
-        return self.next_update(interval, state)
+        state = fill_missing_state(state, self)
+        delta = self.next_update(interval, state)
+        apply_v1_update_in_place(self, state, delta)
+        return {}
 
 
 def update_inheritance(cls, new_base, core):
     if new_base in cls.__bases__:
         return
 
-    # replace the base class with the new base
     cls.__bases__ = cls.__bases__ + (new_base,)
 
-    # store the existing init
-    init = cls.__init__
+    original_init = cls.__init__
+    captured_core = core
 
-    core = core
-
-    # wrap the existing init with an init that accepts arguments
-    # specific to process-bigraph
-    def new_init(self, config=None, core=core, parameters=None):
+    def new_init(self, config=None, core=None, parameters=None):
         config = config or parameters
         parameters = parameters or config
-        core = core
+        if core is None:
+            core = captured_core
 
         try:
-            init(self, parameters=parameters)
+            original_init(self, parameters=parameters)
         except Exception as e:
-            import ipdb; ipdb.set_trace()
+            raise RuntimeError(
+                f"Failed to initialize {cls.__name__}: {e}"
+            ) from e
 
-        self._config = config
+        self._config = config or {}
 
         new_base.__init__(
             self,
@@ -139,8 +221,14 @@ def update_inheritance(cls, new_base, core):
             parameters=parameters,
             core=core)
 
-    # replace the existing init with the new init
     cls.__init__ = new_init
+
+    # Override initial_state and update directly on the class so they
+    # take precedence over VivariumProcess/VivariumStep methods in MRO
+    if not hasattr(cls, '_omni_patched'):
+        cls.initial_state = new_base.initial_state
+        cls.update = new_base.update
+        cls._omni_patched = True
 
 
 def find_instances(module, visited=None):
@@ -150,18 +238,21 @@ def find_instances(module, visited=None):
 
     for key in dir(module):
         value = getattr(module, key)
-        if isinstance(value, type) and issubclass(value, VivariumStep) and not value == VivariumStep:
-            steps[key] = value
-        elif isinstance(value, type) and issubclass(value, VivariumProcess) and not value == VivariumProcess:
-            processes[key] = value
-        elif inspect.ismodule(value) and value.__name__.startswith('ecoli') and value not in visited:
-            visited.add(value)
-            substeps, subprocesses = find_instances(
-                value,
-                visited)
+        if not isinstance(value, type):
+            if inspect.ismodule(value) and value.__name__.startswith('ecoli') and value not in visited:
+                visited.add(value)
+                substeps, subprocesses = find_instances(value, visited)
+                steps.update(substeps)
+                processes.update(subprocesses)
+            continue
 
-            steps.update(substeps)
-            processes.update(subprocesses)
+        if value in (VivariumStep, VivariumProcess):
+            continue
+
+        if issubclass(value, VivariumStep):
+            steps[key] = value
+        elif issubclass(value, VivariumProcess):
+            processes[key] = value
 
     return steps, processes
 
@@ -209,7 +300,7 @@ def list_paths(path):
         return result
 
 
-def translate_processes(core, tree, topology=None):
+def translate_processes(core, tree, topology=None, edge_type=None):
     if isinstance(tree, BigraphEdge):
         cls = type(tree)
 
@@ -218,40 +309,27 @@ def translate_processes(core, tree, topology=None):
         if not hasattr(tree, '_config'):
             tree._config = tree.parameters
 
-        if not hasattr(cls, 'config_schema') or not cls.config_schema:
-            inferred_schema = core.infer(tree.config)
-            cls.config_schema = core.render(inferred_schema)
+        if not hasattr(cls, 'config_schema'):
+            cls.config_schema = {}
 
-        type_name = 'step'
-        state = {}
-        if isinstance(tree, BigraphProcess):
+        if edge_type == 'process':
             type_name = 'process'
-            state['interval'] = 1.0
+            state = {'interval': 1.0}
         else:
-            state['priority'] = 1.0
+            type_name = 'step'
+            state = {'priority': 1.0}
 
         if topology is None:
             topology = tree.topology
 
         wires = list_paths(topology)
 
-        # tree.__init__(
-        #     parameters=config,
-        #     config=config,
-        #     core=core)
-
         process_class = cls.__name__
-
-        # config_schema = infer(tree.parameters)
-
-        config = translate_processes(
-            core,
-            tree.parameters)
 
         state.update({
             '_type': type_name,
             'address': f'local:{process_class}',
-            'config': config,
+            'config': tree.parameters,
             '_inputs': tree.inputs(),
             '_outputs': tree.outputs(),
             'instance': tree,
@@ -266,7 +344,8 @@ def translate_processes(core, tree, topology=None):
             result[key] = translate_processes(
                 core,
                 subtree,
-                topology[key] if topology else None)
+                topology[key] if topology else None,
+                edge_type=edge_type)
 
         return result
 
@@ -274,16 +353,199 @@ def translate_processes(core, tree, topology=None):
         return tree
 
 
+def seed_initial_state(state, sim):
+    """Run specific listener steps to populate derived values needed by other processes.
+
+    In v1, listeners compute mass/volume from bulk data each timestep.
+    We pre-compute these by running listener steps and applying only dict updates."""
+    flow = sim.ecoli.flow
+    listeners_to_seed = ['post-division-mass-listener', 'ecoli-mass-listener']
+
+    for path_key, substates in state.items():
+        if not isinstance(substates, dict):
+            continue
+        for subkey, cell_state in substates.items():
+            if not isinstance(cell_state, dict):
+                continue
+            for step_name in listeners_to_seed:
+                edge = cell_state.get(step_name)
+                if not isinstance(edge, dict) or 'instance' not in edge:
+                    continue
+                instance = edge['instance']
+                if not hasattr(instance, 'next_update'):
+                    continue
+                _ensure_wired_paths(cell_state, edge)
+                _populate_port_defaults(cell_state, edge, instance)
+                try:
+                    view = _build_view(cell_state, edge, instance)
+                    timestep = instance.parameters.get('timestep', 1.0)
+                    update = instance.next_update(timestep, view)
+                    _apply_dict_updates(cell_state, edge.get('outputs', {}), update)
+                except Exception:
+                    continue
+    return state
+
+
+SCALAR_STATE_KEYS = {'global_time', 'timestep', 'next_update_time'}
+
+def _ensure_wired_paths(cell_state, edge):
+    """Ensure output paths that will receive dict updates exist as empty dicts."""
+    wires = edge.get('outputs', {})
+    for port_name, wire_path in wires.items():
+        if isinstance(wire_path, list) and len(wire_path) == 1:
+            key = wire_path[0]
+            if key in SCALAR_STATE_KEYS:
+                continue
+            if key not in cell_state or cell_state[key] is None:
+                cell_state[key] = {}
+
+
+def _populate_port_defaults(cell_state, edge, instance):
+    """Populate port defaults into the state along wired paths."""
+    try:
+        ports = instance.ports_schema()
+    except Exception:
+        return
+    wires = edge.get('inputs', {})
+    for port_name, wire_path in wires.items():
+        if not isinstance(wire_path, list) or not wire_path:
+            continue
+        port = ports.get(port_name)
+        if not isinstance(port, dict):
+            continue
+
+        if '_default' in port:
+            target = cell_state
+            for segment in wire_path[:-1]:
+                if isinstance(target, dict):
+                    if segment not in target or target[segment] is None:
+                        target[segment] = {}
+                    target = target[segment]
+                else:
+                    break
+            if isinstance(target, dict):
+                last = wire_path[-1]
+                if last not in target or target[last] is None:
+                    target[last] = port['_default']
+        else:
+            _inject_nested_defaults(cell_state, wire_path, port)
+
+
+def _inject_nested_defaults(state, wire_path, port_schema):
+    """Inject nested port defaults into state at the given wire path."""
+    target = state
+    for segment in wire_path:
+        if isinstance(target, dict):
+            if segment not in target or target[segment] is None:
+                target[segment] = {}
+            target = target[segment]
+        else:
+            return
+
+    if not isinstance(target, dict):
+        return
+
+    for key, value in port_schema.items():
+        if key.startswith('_'):
+            continue
+        if isinstance(value, dict):
+            if '_default' in value and key not in target:
+                target[key] = value['_default']
+            elif key not in target:
+                target[key] = {}
+                _inject_nested_defaults(target, [key], value)
+            elif isinstance(target[key], dict):
+                _inject_nested_defaults(target, [key], value)
+
+
+def _build_view(cell_state, edge, instance):
+    """Build a state view for a step by following its input wires."""
+    ports = instance.ports_schema()
+    view = {}
+    wires = edge.get('inputs', {})
+    for port_name, wire_path in wires.items():
+        if isinstance(wire_path, list) and wire_path:
+            current = cell_state
+            for segment in wire_path:
+                if isinstance(current, dict):
+                    current = current.get(segment)
+                else:
+                    current = None
+                    break
+            if current is not None:
+                view[port_name] = current
+            elif port_name in ports and isinstance(ports[port_name], dict) and '_default' in ports[port_name]:
+                view[port_name] = ports[port_name]['_default']
+    return view
+
+
+def _apply_dict_updates(cell_state, output_wires, update):
+    """Apply only dict-valued updates from a step back into the state."""
+    for port_name, value in update.items():
+        if not isinstance(value, dict):
+            continue
+        wire_path = output_wires.get(port_name)
+        if not isinstance(wire_path, list) or not wire_path:
+            continue
+        target = cell_state
+        for segment in wire_path[:-1]:
+            if isinstance(target, dict):
+                if segment not in target:
+                    target[segment] = {}
+                target = target[segment]
+            else:
+                break
+        if isinstance(target, dict):
+            last = wire_path[-1]
+            if last not in target:
+                target[last] = {}
+            if isinstance(target[last], dict):
+                target[last].update(value)
+
+
+def extract_flow_priorities(flow):
+    """Convert a v1 flow dict into priority values. Earlier steps get higher priority."""
+    priorities = {}
+    order = list(flow.keys())
+    n = len(order)
+    for i, step_name in enumerate(order):
+        priorities[step_name] = float(n - i)
+    return priorities
+
+
+def inject_flow_dependencies(cell_state, flow):
+    """Add synthetic wiring to enforce the v1 flow execution order.
+
+    For each consecutive pair (A, B) in the flow, adds a shared
+    '_flow_token_{i}' path that A writes to and B reads from.
+    This creates exact path matches for the v2 step dependency system."""
+    order = list(flow.keys())
+    for i, step_name in enumerate(order):
+        edge = cell_state.get(step_name)
+        if not isinstance(edge, dict):
+            continue
+
+        if i > 0:
+            token = f'_flow_token_{i-1}'
+            edge.setdefault('inputs', {})[f'_flow_in_{i}'] = [token]
+
+        if i < len(order) - 1:
+            token = f'_flow_token_{i}'
+            edge.setdefault('outputs', {})[f'_flow_out_{i}'] = [token]
+
+
 def migrate_composite(core, sim):
     processes = translate_processes(
         core,
         sim.ecoli.processes,
-        sim.ecoli.topology)
+        sim.ecoli.topology,
+        edge_type='process')
 
     steps = translate_processes(
         core,
         sim.ecoli.steps,
-        sim.ecoli.topology)
+        sim.ecoli.topology,
+        edge_type='step')
 
     state = deep_merge(
         processes,
@@ -292,5 +554,21 @@ def migrate_composite(core, sim):
     state = deep_merge(
         state,
         sim.generated_initial_state)
+
+    state = seed_initial_state(state, sim)
+
+    flow = sim.ecoli.flow
+    for path_key, substates in state.items():
+        if isinstance(substates, dict):
+            subflow = flow.get(path_key, {})
+            for subkey, subsubstates in substates.items():
+                if isinstance(subsubstates, dict):
+                    inner_flow = subflow.get(subkey, {})
+                    if inner_flow:
+                        priorities = extract_flow_priorities(inner_flow)
+                        for step_name, priority in priorities.items():
+                            if isinstance(subsubstates.get(step_name), dict):
+                                subsubstates[step_name]['priority'] = priority
+                        inject_flow_dependencies(subsubstates, inner_flow)
 
     return state

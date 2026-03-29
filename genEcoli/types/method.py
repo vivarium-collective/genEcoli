@@ -43,10 +43,25 @@ def serialize(schema: Method, state):
 
 @realize.dispatch
 def realize(core, schema: Method, encode, path=()):
-    if isinstance(encode, typing.Callable):
+    if callable(encode):
         return schema, encode, []
+    elif isinstance(encode, dict):
+        import importlib
+        module_name = encode.get('module') or str(schema.module)
+        instance_name = encode.get('instance') or str(schema.instance)
+        attribute_name = encode.get('attribute') or str(schema.attribute)
+
+        mod = importlib.import_module(module_name)
+
+        if instance_name and instance_name != 'None':
+            cls = getattr(mod, instance_name)
+            func = getattr(cls, attribute_name)
+        else:
+            func = getattr(mod, attribute_name)
+
+        return schema, func, []
     else:
-        import ipdb; ipdb.set_trace()
+        return schema, encode, []
 
 @render.dispatch
 def render(schema: Method, defaults=False):
