@@ -242,9 +242,5 @@ if __name__ == '__main__':
 
     # test_run_ecoli(core)
 
-    if not Path('out/migrate.pickle').exists():
-        migrate, sim = test_generate_migration(core)
-        test_run_ecoli(core, migrate=migrate, sim=sim)
-
-    else:
-        test_run_ecoli(core)
+    migrate, sim = test_generate_migration(core)
+    test_run_ecoli(core, migrate=migrate, sim=sim)
