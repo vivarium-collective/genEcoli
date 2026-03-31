@@ -142,20 +142,27 @@ def plot_ecoli_bigraph(document, outpath='out/ecoli.pickle', show_partitioning=F
     if show_partitioning:
         basename += '_partitioned'
 
-    for fmt in ['png', 'svg']:
-        plot_bigraph(
-            viz_state,
-            remove_process_place_edges=True,
-            node_groups=groups,
-            node_fill_colors=colors,
-            size='20,16',
-            rankdir='TB',
-            dpi='200',
-            port_labels=False,
-            label_margin='0.02',
-            out_dir=out_dir,
-            filename=basename,
-            file_format=fmt,
-        )
+    layouts = {
+        'TB': {'size': '20,16', 'suffix': ''},
+        'RL': {'size': '16,20', 'suffix': '_LR'},
+    }
 
-    print(f"Saved bigraph plot to {out_dir}/{basename}.png and .svg")
+    for layout_dir, layout_opts in layouts.items():
+        name = basename + layout_opts['suffix']
+        for fmt in ['png', 'svg']:
+            plot_bigraph(
+                viz_state,
+                remove_process_place_edges=True,
+                node_groups=groups,
+                node_fill_colors=colors,
+                size=layout_opts['size'],
+                rankdir=layout_dir,
+                dpi='200',
+                port_labels=False,
+                node_label_size='16pt',
+                label_margin='0.05',
+                out_dir=out_dir,
+                filename=name,
+                file_format=fmt,
+            )
+        print(f"Saved bigraph plot to {out_dir}/{name}.png and .svg")
