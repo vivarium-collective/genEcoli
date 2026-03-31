@@ -1,6 +1,6 @@
 import os
 import copy
-import pickle
+import dill
 import inspect
 import functools
 
@@ -456,6 +456,10 @@ class EcoliComposite(Composite):
             if self._cell_path:
                 break
 
+        # Seed mass listener data (must run fresh each time, not baked into pickle)
+        if self._cell_path:
+            _seed_listeners(get_path(self.state, self._cell_path))
+
         # Add RAMEmitter as a step inside the cell state
         self._setup_emitter()
 
@@ -540,11 +544,23 @@ class EcoliComposite(Composite):
             for path in self.process_paths}
 
         self.bridge_updates = []
+
+        # Initialize caches expected by newer process-bigraph versions
+        self._view_cache = {}
+        self._project_cache = {}
+        self._fast_view_paths = {}
+        self._fast_project_paths = {}
+        self._compiled_projects = {}
+
         self.build_step_network()
         self._reset_process_state()
 
     def _reset_process_state(self):
-        """Reset internal caches and flags on process instances."""
+        """Reset internal caches and flags on all process instances.
+
+        Clears _idx caches on both step instances and their nested
+        PartitionedProcess objects so they re-initialize from the
+        current state on first use."""
         if not self._cell_path:
             return
         cell_state = get_path(self.state, self._cell_path)
@@ -552,13 +568,20 @@ class EcoliComposite(Composite):
             if not isinstance(val, dict) or 'instance' not in val:
                 continue
             instance = val['instance']
+
+            # Clear caches on the step instance
+            for attr in list(vars(instance).keys()):
+                if attr.endswith('_idx') or attr == 'molecule_idx' or attr == 'bulk_idx':
+                    setattr(instance, attr, None)
+
+            # Clear caches on nested PartitionedProcess
             if hasattr(instance, 'parameters') and 'process' in instance.parameters:
                 proc = instance.parameters['process']
                 if hasattr(proc, 'request_set'):
                     proc.request_set = False
-            for attr in list(vars(instance).keys()):
-                if attr.endswith('_idx') or attr == 'molecule_idx' or attr == 'bulk_idx':
-                    setattr(instance, attr, None)
+                for attr in list(vars(proc).keys()):
+                    if attr.endswith('_idx') or attr == 'molecule_idx' or attr == 'bulk_idx':
+                        setattr(proc, attr, None)
 
     def _ensure_unique_updaters(self):
         """Lazily initialize the shared UniqueNumpyUpdater registry."""
@@ -585,9 +608,6 @@ class EcoliComposite(Composite):
             cell_state['global_time'] = self.state.get('global_time', 0.0)
             return [self._cell_path + ('global_time',)]
         return []
-
-    def run(self, interval, force_complete=False):
-        super().run(interval, force_complete=force_complete)
 
     def run_steps(self, step_paths):
         """Execute steps using v1 updater semantics with proper path tracking."""
@@ -700,6 +720,18 @@ class OmniProcess(BigraphProcess):
     def initial_state(self, config=None):
         return {}
 
+    def calculate_timestep(self, interval_or_state, state=None):
+        """Bridge v1 calculate_timestep(states) to v2 signature(interval, state).
+
+        v1 engine calls calculate_timestep(states) with 1 arg.
+        v2 Composite calls calculate_timestep(interval, state) with 2 args."""
+        if state is None:
+            # Called by v1 engine: interval_or_state is actually 'states'
+            return self.parameters.get('timestep', 1.0)
+        else:
+            # Called by v2 Composite: interval_or_state is 'interval'
+            return interval_or_state
+
     def update(self, state, interval):
         state = fill_missing_state(state, self)
         delta = self.next_update(interval, state)
@@ -735,6 +767,8 @@ def update_inheritance(cls, new_base, core):
     if not hasattr(cls, '_omni_patched'):
         cls.initial_state = new_base.initial_state
         cls.update = new_base.update
+        if hasattr(new_base, 'calculate_timestep'):
+            cls.calculate_timestep = new_base.calculate_timestep
         cls._omni_patched = True
 
 
@@ -839,34 +873,31 @@ def translate_processes(core, tree, topology=None, edge_type=None):
 SCALAR_STATE_KEYS = {'global_time', 'timestep', 'next_update_time'}
 
 
-def seed_initial_state(state, sim):
-    """Run listener steps to populate derived values (mass, volume, etc.)."""
-    flow = sim.ecoli.flow
-    listeners_to_seed = ['post-division-mass-listener', 'ecoli-mass-listener']
+LISTENERS_TO_SEED = ['post-division-mass-listener', 'ecoli-mass-listener']
 
-    for path_key, substates in state.items():
-        if not isinstance(substates, dict):
+
+def _seed_listeners(cell_state):
+    """Run mass listener steps on cell_state to populate derived values.
+
+    Must be called each time a composite is created so that mass/volume
+    data is available for processes that need it on the first timestep.
+    Does not require the sim object — works directly on cell state."""
+    for step_name in LISTENERS_TO_SEED:
+        edge = cell_state.get(step_name)
+        if not isinstance(edge, dict) or 'instance' not in edge:
             continue
-        for subkey, cell_state in substates.items():
-            if not isinstance(cell_state, dict):
-                continue
-            for step_name in listeners_to_seed:
-                edge = cell_state.get(step_name)
-                if not isinstance(edge, dict) or 'instance' not in edge:
-                    continue
-                instance = edge['instance']
-                if not hasattr(instance, 'next_update'):
-                    continue
-                _ensure_wired_paths(cell_state, edge)
-                _populate_port_defaults(cell_state, edge, instance)
-                try:
-                    view = _build_view(cell_state, edge, instance)
-                    timestep = instance.parameters.get('timestep', 1.0)
-                    update = instance.next_update(timestep, view)
-                    _apply_dict_updates(cell_state, edge.get('outputs', {}), update)
-                except Exception:
-                    continue
-    return state
+        instance = edge['instance']
+        if not hasattr(instance, 'next_update'):
+            continue
+        _ensure_wired_paths(cell_state, edge)
+        _populate_port_defaults(cell_state, edge, instance)
+        try:
+            view = _build_view(cell_state, edge, instance)
+            timestep = instance.parameters.get('timestep', 1.0)
+            update = instance.next_update(timestep, view)
+            _apply_dict_updates(cell_state, edge.get('outputs', {}), update)
+        except Exception:
+            continue
 
 
 def _ensure_wired_paths(cell_state, edge):
@@ -972,8 +1003,6 @@ def migrate_composite(core, sim):
 
     state = deep_merge(processes, steps)
     state = deep_merge(state, sim.generated_initial_state)
-    state = seed_initial_state(state, sim)
-
     flow = sim.ecoli.flow
     for path_key, substates in state.items():
         if isinstance(substates, dict):
@@ -1021,7 +1050,7 @@ def generate_ecoli_document(outpath='out/ecoli.pickle'):
 
     os.makedirs(os.path.dirname(outpath) or '.', exist_ok=True)
     with open(outpath, 'wb') as f:
-        pickle.dump(document, f)
+        dill.dump(document, f)
 
     print(f"Saved E. coli document to {outpath}")
 
@@ -1047,6 +1076,6 @@ def load_ecoli_composite(path='out/ecoli.pickle', core=None):
         core = scan_update(core, 'ecoli.processes')
 
     with open(path, 'rb') as f:
-        document = pickle.load(f)
+        document = dill.load(f)
 
     return EcoliComposite(document, core=core)

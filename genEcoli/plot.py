@@ -213,8 +213,10 @@ def v1_query_to_mass_timeseries(timeseries):
     """Convert v1 sim.query() output to mass timeseries arrays.
 
     Handles the raw format {time: {path: value}} returned by query().
+    Skips t=0 (raw initial state before equilibration) to match v2's
+    emitter which first fires after the first complete timestep.
     """
-    times = sorted(t for t in timeseries.keys() if isinstance(t, (int, float)))
+    times = sorted(t for t in timeseries.keys() if isinstance(t, (int, float)) and t > 0)
     result = {'time': np.array(times)}
     for label, key in MASS_COMPONENTS.items():
         values = []

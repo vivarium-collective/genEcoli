@@ -9,7 +9,8 @@ dependencies = [
     "process-bigraph>=0.0.38",
     "vEcoli[dev]>=1.1.0",
     "vivarium-core>=1.6.5",
-    "plum-dispatch>=2.5"
+    "plum-dispatch>=2.5",
+    "dill>=0.3"
 ]
 
 [tool.setuptools]
