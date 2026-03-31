@@ -710,8 +710,8 @@ def translate_processes(core, tree, topology=None, edge_type=None):
             '_inputs': tree.inputs(),
             '_outputs': tree.outputs(),
             'instance': tree,
-            'inputs': wires,
-            'outputs': wires})
+            'inputs': copy.deepcopy(wires),
+            'outputs': copy.deepcopy(wires)})
 
         return state
 
