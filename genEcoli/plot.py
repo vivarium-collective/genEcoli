@@ -159,7 +159,7 @@ def plot_ecoli_bigraph(document, outpath='out/ecoli.pickle', show_partitioning=F
                 rankdir=layout_dir,
                 dpi='200',
                 port_labels=False,
-                node_label_size='24pt',
+                node_label_size='32pt',
                 label_margin='0.08',
                 out_dir=out_dir,
                 filename=name,
