@@ -410,6 +410,7 @@ class EcoliComposite(Composite):
     def __init__(self, config=None, core=None):
         self._unique_updaters = None
         self._cell_path = None
+        self.history = {}  # {time: {key: value}} snapshots collected during run
 
         # Skip initial run_steps during parent init
         original_run_steps = EcoliComposite.run_steps
@@ -518,10 +519,30 @@ class EcoliComposite(Composite):
         pass
 
     def apply_updates(self, updates):
-        """Override to skip core.apply/realize which would replace state dicts."""
+        """Override to skip core.apply/realize which would replace state dicts.
+        Also snapshots mass data after each timestep for history collection."""
+        self._snapshot()
         if self._cell_path:
             return [self._cell_path + ('global_time',)]
         return []
+
+    def _snapshot(self):
+        """Record current mass listener values into history."""
+        if not self._cell_path:
+            return
+        cell_state = get_path(self.state, self._cell_path)
+        mass = cell_state.get('listeners', {}).get('mass', {})
+        if not mass:
+            return
+        t = self.state.get('global_time', 0.0)
+        self.history[t] = {k: copy.copy(v) for k, v in mass.items()
+                           if isinstance(v, (int, float))}
+
+    def run(self, interval, force_complete=False):
+        """Override to collect state snapshots at t=0 and after completion."""
+        self._snapshot()
+        super().run(interval, force_complete=force_complete)
+        self._snapshot()
 
     def run_steps(self, step_paths):
         """Execute steps using v1 updater semantics with proper path tracking."""

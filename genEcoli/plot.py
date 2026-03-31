@@ -1,6 +1,9 @@
-"""Bigraph visualization for the E. coli composite."""
+"""Visualization functions for the E. coli composite."""
 
 import os
+
+import numpy as np
+import matplotlib.pyplot as plt
 from bigraph_viz import plot_bigraph
 
 
@@ -166,3 +169,98 @@ def plot_ecoli_bigraph(document, outpath='out/ecoli.pickle', show_partitioning=F
                 file_format=fmt,
             )
         print(f"Saved bigraph plot to {out_dir}/{name}.png and .svg")
+
+
+# ---------------------------------------------------------------------------
+# Mass fraction summary plot
+# ---------------------------------------------------------------------------
+
+MASS_COMPONENTS = {
+    'Protein': 'protein_mass',
+    'tRNA': 'tRna_mass',
+    'rRNA': 'rRna_mass',
+    'mRNA': 'mRna_mass',
+    'DNA': 'dna_mass',
+    'Small Mol': 'smallMolecule_mass',
+    'Dry Mass': 'dry_mass',
+}
+
+MASS_COLORS = [
+    '#e41a1c', '#377eb8', '#4daf4a', '#984ea3',
+    '#ff7f00', '#ffff33', '#a65628',
+]
+
+
+def history_to_mass_timeseries(history):
+    """Convert a history dict {time: {key: val}} to mass timeseries arrays.
+
+    Returns:
+        dict with 'time' array and arrays for each mass component.
+    """
+    times = sorted(history.keys())
+    result = {'time': np.array(times)}
+    for label, key in MASS_COMPONENTS.items():
+        result[label] = np.array([history[t].get(key, 0.0) for t in times])
+    return result
+
+
+def v1_query_to_mass_timeseries(timeseries):
+    """Convert v1 sim.query() output to mass timeseries arrays.
+
+    Handles the raw format {time: {path: value}} returned by query().
+    """
+    times = sorted(t for t in timeseries.keys() if isinstance(t, (int, float)))
+    result = {'time': np.array(times)}
+    for label, key in MASS_COMPONENTS.items():
+        values = []
+        for t in times:
+            snapshot = timeseries[t]
+            mass = snapshot.get('listeners', {}).get('mass', {})
+            values.append(mass.get(key, 0.0))
+        result[label] = np.array(values)
+    return result
+
+
+def plot_mass_fractions(datasets, outpath='out/mass_fraction_summary.png'):
+    """Plot mass fraction summary comparing one or more simulation runs.
+
+    Reproduces the vEcoli mass_fraction_summary analysis: shows biomass
+    component fold-changes over time, normalized to t=0.
+
+    Args:
+        datasets: Dict of {label: timeseries} where each timeseries has
+            'time' and mass component arrays (from history_to_mass_timeseries
+            or v1_query_to_mass_timeseries).
+        outpath: Path for the output PNG.
+    """
+    n_datasets = len(datasets)
+    fig, axes = plt.subplots(1, n_datasets, figsize=(8 * n_datasets, 6),
+                             squeeze=False)
+
+    for col, (ds_label, ts) in enumerate(datasets.items()):
+        ax = axes[0, col]
+        time_min = (ts['time'] - ts['time'][0]) / 60.0
+
+        for i, (label, key) in enumerate(MASS_COMPONENTS.items()):
+            values = ts.get(label)
+            if values is None or len(values) == 0 or values[0] == 0:
+                continue
+            fold_change = values / values[0]
+            fraction = np.mean(values / ts['Dry Mass']) if 'Dry Mass' in ts else 0
+            ax.plot(time_min, fold_change,
+                    color=MASS_COLORS[i % len(MASS_COLORS)],
+                    label=f'{label} ({fraction:.3f})')
+
+        ax.set_xlabel('Time (min)')
+        ax.set_ylabel('Mass (normalized to t=0)')
+        ax.set_title(ds_label)
+        ax.legend(fontsize=8)
+
+    fig.suptitle('Biomass components (avg fraction of dry mass in parentheses)',
+                 fontsize=12)
+    fig.tight_layout()
+
+    os.makedirs(os.path.dirname(outpath) or '.', exist_ok=True)
+    fig.savefig(outpath, dpi=200)
+    plt.close(fig)
+    print(f"Saved mass fraction plot to {outpath}")
