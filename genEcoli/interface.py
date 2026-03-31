@@ -13,9 +13,9 @@ from genEcoli.types.process import translate_ports
 
 
 __all__ = [
-    'OmniStep',
-    'OmniProcess',
-    'Resolver'
+    'EcoliComposite',
+    'generate_ecoli_document',
+    'load_ecoli_composite',
 ]
 
 class Revert:
@@ -361,70 +361,6 @@ class EcoliComposite(Composite):
             self.run_steps(to_run)
         else:
             self.steps_run = set()
-
-
-def run_ecoli_sim(composite, flow, interval, timestep=1.0):
-    """Run the E. coli simulation using the v1 flow execution model.
-
-    Instead of relying on v2's Composite.run() trigger system, this executes
-    all steps in v1 flow order every timestep — matching vEcoli's original
-    execution model exactly.
-
-    Args:
-        composite: A v2 Composite holding the migrated state.
-        flow: The v1 flow dict (sim.ecoli.flow) defining step execution order.
-        interval: Total simulated time to run.
-        timestep: Time per step (default 1.0s, matching v1).
-    """
-    inner_flow = None
-    cell_path = None
-    for path_key in flow:
-        subflow = flow[path_key]
-        if isinstance(subflow, dict):
-            for subkey in subflow:
-                if isinstance(subflow[subkey], dict) and subflow[subkey]:
-                    inner_flow = subflow[subkey]
-                    cell_path = (path_key, subkey)
-                    break
-        if inner_flow:
-            break
-
-    if inner_flow is None:
-        raise ValueError("Could not find flow order in flow dict")
-
-    step_order = list(inner_flow.keys())
-    cell_state = composite.state[cell_path[0]][cell_path[1]]
-
-    _make_arrays_writeable(cell_state)
-    _disable_readonly_arrays()
-    unique_updaters = _share_unique_updaters(cell_state, step_order)
-
-    num_steps = int(interval / timestep)
-    for t in range(num_steps):
-        for step_name in step_order:
-            _make_arrays_writeable(cell_state)
-            edge = cell_state.get(step_name)
-            if not isinstance(edge, dict) or 'instance' not in edge:
-                continue
-
-            instance = edge['instance']
-            if not hasattr(instance, 'next_update'):
-                continue
-
-            try:
-                view = _build_view(cell_state, edge, instance)
-                view = fill_missing_state(view, instance)
-                step_ts = instance.parameters.get('timestep', timestep)
-                delta = instance.next_update(step_ts, view)
-                if delta:
-                    apply_step_update(cell_state, edge, instance, delta,
-                                      unique_updaters=unique_updaters)
-            except Exception as e:
-                print(f"Step {step_name} failed at t={t}: {type(e).__name__}: {e}")
-
-        composite.state['global_time'] += timestep
-        if 'global_time' in cell_state:
-            cell_state['global_time'] = composite.state['global_time']
 
 
 def _make_arrays_writeable(state):
