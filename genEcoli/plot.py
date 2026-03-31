@@ -144,7 +144,7 @@ def plot_ecoli_bigraph(document, outpath='out/ecoli.pickle', show_partitioning=F
 
     layouts = {
         'TB': {'size': '20,16', 'suffix': ''},
-        'RL': {'size': '16,20', 'suffix': '_LR'},
+        'LR': {'size': '16,20', 'suffix': '_LR'},
     }
 
     for layout_dir, layout_opts in layouts.items():
