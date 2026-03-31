@@ -69,12 +69,17 @@ def _deep_update(target, source):
             target[key] = value
 
 
-def apply_step_update(cell_state, edge, instance, delta):
+def apply_step_update(cell_state, edge, instance, delta, unique_updaters=None):
     """Apply a step's delta update to cell_state by following output wire paths.
 
     Unlike apply_v1_update_in_place (which modifies a view dict), this writes
-    directly into cell_state via output wires, so scalar replacements propagate."""
+    directly into cell_state via output wires, so scalar replacements propagate.
+
+    unique_updaters: shared registry of UniqueNumpyUpdater instances keyed
+    by wire path tuple, so all steps accessing the same unique molecule
+    accumulate into the same updater."""
     import numpy as np
+    from ecoli.library.schema import UniqueNumpyUpdater
 
     try:
         ports = instance.ports_schema()
@@ -85,9 +90,6 @@ def apply_step_update(cell_state, edge, instance, delta):
 
     for port_name, update_value in delta.items():
         if port_name.startswith('_flow_'):
-            continue
-
-        if update_value == {"update": True}:
             continue
 
         wire_path = output_wires.get(port_name)
@@ -132,7 +134,16 @@ def apply_step_update(cell_state, edge, instance, delta):
                         current = current.copy()
                         current.flags.writeable = True
                         target[key] = current
-                updater(current, update_value)
+                wire_key = tuple(wire_path) if isinstance(wire_path, list) else None
+                if (unique_updaters and wire_key and wire_key in unique_updaters
+                        and hasattr(updater, '__self__')
+                        and isinstance(updater.__self__, UniqueNumpyUpdater)):
+                    shared_updater = unique_updaters[wire_key]
+                    result = shared_updater.updater(current, update_value)
+                    if result is not current:
+                        target[key] = result
+                else:
+                    updater(current, update_value)
         elif isinstance(update_value, dict):
             current = target.get(key)
             if isinstance(current, dict):
@@ -183,6 +194,7 @@ def run_ecoli_sim(composite, flow, interval, timestep=1.0):
 
     _make_arrays_writeable(cell_state)
     _disable_readonly_arrays()
+    unique_updaters = _share_unique_updaters(cell_state, step_order)
 
     num_steps = int(interval / timestep)
     for t in range(num_steps):
@@ -202,7 +214,8 @@ def run_ecoli_sim(composite, flow, interval, timestep=1.0):
                 step_ts = instance.parameters.get('timestep', timestep)
                 delta = instance.next_update(step_ts, view)
                 if delta:
-                    apply_step_update(cell_state, edge, instance, delta)
+                    apply_step_update(cell_state, edge, instance, delta,
+                                      unique_updaters=unique_updaters)
             except Exception as e:
                 print(f"Step {step_name} failed at t={t}: {type(e).__name__}: {e}")
 
@@ -233,6 +246,46 @@ def _make_arrays_writeable(state):
                         state[key] = value.copy()
             elif isinstance(value, dict):
                 _make_arrays_writeable(value)
+
+
+def _share_unique_updaters(cell_state, step_order):
+    """Create a shared registry of UniqueNumpyUpdater instances, one per
+    unique molecule wire path. Returns the registry for use in apply_step_update.
+
+    In v1, all processes that access the same unique molecule share a single
+    updater via the Store. We replicate this by creating one updater per path."""
+    from ecoli.library.schema import UniqueNumpyUpdater
+
+    shared = {}
+
+    for step_name in step_order:
+        edge = cell_state.get(step_name)
+        if not isinstance(edge, dict) or 'instance' not in edge:
+            continue
+        instance = edge['instance']
+        if not hasattr(instance, 'ports_schema'):
+            continue
+        try:
+            ports = instance.ports_schema()
+        except Exception:
+            continue
+        output_wires = edge.get('outputs', {})
+        for port_name, port in ports.items():
+            if not isinstance(port, dict):
+                continue
+            updater = port.get('_updater')
+            if updater is None or not hasattr(updater, '__self__'):
+                continue
+            if not isinstance(updater.__self__, UniqueNumpyUpdater):
+                continue
+            wire_path = output_wires.get(port_name)
+            if not isinstance(wire_path, list):
+                continue
+            wire_key = tuple(wire_path)
+            if wire_key not in shared:
+                shared[wire_key] = UniqueNumpyUpdater()
+
+    return shared
 
 
 def _disable_readonly_arrays():
