@@ -7,7 +7,7 @@ from bigraph_schema import deep_merge, Edge as BigraphEdge
 from bigraph_schema.schema import Node, Overwrite
 from bigraph_schema.methods import infer, render
 from bigraph_schema.protocols import local_lookup_module
-from process_bigraph import Process as BigraphProcess, Step as BigraphStep
+from process_bigraph import Composite, Process as BigraphProcess, Step as BigraphStep
 
 from genEcoli.types.process import translate_ports
 
@@ -158,6 +158,128 @@ def apply_step_update(cell_state, edge, instance, delta, unique_updaters=None):
                 target[key] = update_value
         elif update_value is not None:
             target[key] = update_value
+
+
+class EcoliComposite(Composite):
+    """Composite subclass with v1-compatible step execution.
+
+    Overrides run_steps to apply v1 updaters in-place (via apply_step_update)
+    while returning proper update paths so the Composite's trigger/cascade
+    system can order downstream steps correctly.
+
+    This allows using Composite.run() instead of the custom run_ecoli_sim loop.
+    """
+
+    def __init__(self, config=None, core=None):
+        self._unique_updaters = None
+        self._cell_path = None
+
+        # Skip initial run_steps during parent init
+        original_run_steps = EcoliComposite.run_steps
+        EcoliComposite.run_steps = lambda self, x: None
+        super().__init__(config, core=core)
+        EcoliComposite.run_steps = original_run_steps
+
+        _make_arrays_writeable(self.state)
+        _disable_readonly_arrays()
+
+        # Cache cell state path
+        for path_key, substates in self.state.items():
+            if isinstance(substates, dict) and path_key != 'global_time':
+                for subkey in substates:
+                    if isinstance(substates[subkey], dict) and len(substates[subkey]) > 10:
+                        self._cell_path = (path_key, subkey)
+                        break
+            if self._cell_path:
+                break
+
+    def _ensure_unique_updaters(self):
+        """Lazily initialize the shared UniqueNumpyUpdater registry."""
+        if self._unique_updaters is not None:
+            return
+
+        if self._cell_path:
+            from bigraph_schema import get_path
+            cell_state = get_path(self.state, self._cell_path)
+            step_names = [k for k, v in cell_state.items()
+                          if isinstance(v, dict) and 'instance' in v]
+            self._unique_updaters = _share_unique_updaters(cell_state, step_names)
+        else:
+            self._unique_updaters = {}
+
+    def expire_process_paths(self, update_paths):
+        """No-op — process paths don't change during v1 simulation."""
+        pass
+
+    def apply_updates(self, updates):
+        """Override to skip core.apply/realize which would replace state dicts
+        and discard in-place modifications from v1 updaters.
+
+        Returns the global_time path at the cell level so trigger_steps
+        can find and trigger steps that depend on time advancement."""
+        if self._cell_path:
+            return [self._cell_path + ('global_time',)]
+        return []
+
+    def run_steps(self, step_paths):
+        """Execute steps using v1 updater semantics with proper path tracking.
+
+        Applies v1 updates in-place via apply_step_update, then reports
+        the updated wire paths so the Composite's cascade system can
+        trigger downstream steps."""
+        from bigraph_schema import get_path
+
+        if not step_paths:
+            self.steps_run = set()
+            return
+
+        self._ensure_unique_updaters()
+
+        update_paths = []
+        for step_path in step_paths:
+            step = get_path(self.state, step_path)
+            if not isinstance(step, dict) or 'instance' not in step:
+                continue
+
+            instance = step['instance']
+            if not hasattr(instance, 'next_update'):
+                continue
+
+            cell_state_path = step_path[:-1]
+            cell_state = get_path(self.state, cell_state_path)
+
+            _make_arrays_writeable(cell_state)
+
+            try:
+                view = _build_view(cell_state, step, instance)
+                view = fill_missing_state(view, instance)
+                timestep = instance.parameters.get('timestep', 1.0)
+                delta = instance.next_update(timestep, view)
+                if delta:
+                    apply_step_update(cell_state, step, instance, delta,
+                                      unique_updaters=self._unique_updaters)
+
+                # Report all output wire paths (including flow tokens) for triggering
+                output_wires = step.get('outputs', {})
+                for port_name, wire_path in output_wires.items():
+                    if isinstance(wire_path, list) and wire_path:
+                        full_path = tuple(list(cell_state_path) + wire_path)
+                        update_paths.append(full_path)
+                    elif isinstance(wire_path, dict):
+                        base = wire_path.get('_path', [])
+                        if base:
+                            full_path = tuple(list(cell_state_path) + base)
+                            update_paths.append(full_path)
+            except Exception as e:
+                pass
+
+        self.expire_process_paths(update_paths)
+        to_run = self.cycle_step_state()
+
+        if to_run:
+            self.run_steps(to_run)
+        else:
+            self.steps_run = set()
 
 
 def run_ecoli_sim(composite, flow, interval, timestep=1.0):
@@ -443,8 +565,7 @@ class OmniProcess(BigraphProcess):
     def update(self, state, interval):
         state = fill_missing_state(state, self)
         delta = self.next_update(interval, state)
-        apply_v1_update_in_place(self, state, delta)
-        return {}
+        return delta if delta else {}
 
 
 def update_inheritance(cls, new_base, core):
@@ -840,12 +961,18 @@ def inject_flow_dependencies(cell_state, flow):
 
     For each consecutive pair (A, B) in the flow, adds a shared
     '_flow_token_{i}' path that A writes to and B reads from.
-    This creates exact path matches for the v2 step dependency system."""
+    This creates exact path matches for the v2 step dependency system.
+
+    Also ensures the first step in the flow wires global_time as input
+    so it gets triggered when Composite.run() advances time."""
     order = list(flow.keys())
     for i, step_name in enumerate(order):
         edge = cell_state.get(step_name)
         if not isinstance(edge, dict):
             continue
+
+        if i == 0:
+            edge.setdefault('inputs', {}).setdefault('global_time', ['global_time'])
 
         if i > 0:
             token = f'_flow_token_{i-1}'
