@@ -19,7 +19,7 @@ from wholecell.utils.filepath import ROOT_PATH
 from ecoli.composites.ecoli_master import run_ecoli
 from ecoli.experiments.ecoli_master_sim import EcoliSim, CONFIG_DIR_PATH
 
-from genEcoli import update_inheritance, scan_processes, update_processes, migrate_composite, OmniStep, OmniProcess, scan_update, run_ecoli_sim
+from genEcoli import update_inheritance, scan_processes, update_processes, migrate_composite, OmniStep, OmniProcess, scan_update, run_ecoli_sim, EcoliComposite, generate_ecoli_document, load_ecoli_composite
 from genEcoli.types import find_units, ECOLI_TYPES
 
 class TestStep(VivariumStep):
@@ -244,3 +244,26 @@ if __name__ == '__main__':
 
     migrate, sim = test_generate_migration(core)
     test_run_ecoli(core, migrate=migrate, sim=sim)
+
+    # Test EcoliComposite.run() — uses native Composite execution
+    print("\n=== Test EcoliComposite.run() ===")
+    inferred = core.infer(migrate)
+    ecoli = EcoliComposite({'schema': inferred, 'state': migrate}, core=core)
+    bulk_before = ecoli.state['agents']['0']['bulk']['count'].copy()
+    ecoli.run(10.0)
+    bulk_after = ecoli.state['agents']['0']['bulk']['count']
+    changed = (bulk_before != bulk_after).sum()
+    print(f"EcoliComposite.run: {changed} / {len(bulk_before)} molecules changed")
+    assert changed > 0, "EcoliComposite.run produced no changes"
+
+    # Test save/load round-trip
+    print("\n=== Test save/load round-trip ===")
+    generate_ecoli_document('out/ecoli.pickle')
+    core2 = initialize_tests()
+    ecoli2 = load_ecoli_composite('out/ecoli.pickle', core=core2)
+    bulk_before2 = ecoli2.state['agents']['0']['bulk']['count'].copy()
+    ecoli2.run(10.0)
+    bulk_after2 = ecoli2.state['agents']['0']['bulk']['count']
+    changed2 = (bulk_before2 != bulk_after2).sum()
+    print(f"From pickle: {changed2} / {len(bulk_before2)} molecules changed")
+    assert changed2 > 0, "Loaded composite produced no changes"

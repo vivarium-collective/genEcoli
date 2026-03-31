@@ -177,7 +177,32 @@ class EcoliComposite(Composite):
         # Skip initial run_steps during parent init
         original_run_steps = EcoliComposite.run_steps
         EcoliComposite.run_steps = lambda self, x: None
-        super().__init__(config, core=core)
+
+        # Check if state already has process instances (loaded from pickle)
+        # If so, skip core.realize which would re-process the state
+        state = config.get('state', {}) if isinstance(config, dict) else {}
+        has_instances = False
+        for lv1 in state.values():
+            if not isinstance(lv1, dict):
+                continue
+            for lv2 in lv1.values():
+                if not isinstance(lv2, dict):
+                    continue
+                for lv3 in lv2.values():
+                    if isinstance(lv3, dict) and 'instance' in lv3:
+                        has_instances = True
+                        break
+                if has_instances:
+                    break
+            if has_instances:
+                break
+
+        if has_instances:
+            # State already has live instances — initialize without realize
+            self._init_from_migrated(config, core)
+        else:
+            super().__init__(config, core=core)
+
         EcoliComposite.run_steps = original_run_steps
 
         _make_arrays_writeable(self.state)
@@ -192,6 +217,62 @@ class EcoliComposite(Composite):
                         break
             if self._cell_path:
                 break
+
+    def _init_from_migrated(self, config, core):
+        """Initialize from a migrated state that already has process instances.
+        Skips core.realize to preserve the state as-is."""
+        from process_bigraph.composite import empty_front
+
+        self.core = core
+        self._config = {}
+        self._composition = 'edge'
+        self._state = {}
+
+        self.schema = config.get('schema', {})
+        self.state = config.get('state', {})
+        self.bridge = config.get('bridge', {})
+
+        if 'global_time' not in self.state:
+            self.state['global_time'] = 0.0
+
+        self.front = {}
+        self.find_instance_paths(self.state)
+        self.edge_paths = {**self.process_paths, **self.step_paths}
+
+        self.process_schema = {port: {} for port in ['inputs', 'outputs']}
+        self.global_time_precision = config.get('global_time_precision')
+
+        self.front = {
+            path: empty_front(self.state['global_time'])
+            for path in self.process_paths}
+
+        self.bridge_updates = []
+        self.build_step_network()
+
+        # Reset process internal state that may be stale from pickling
+        self._reset_process_state()
+
+    def _reset_process_state(self):
+        """Reset internal caches and flags on process instances.
+
+        After pickling, process instances may have cached numpy indices
+        that point to old array objects. Clear these so they get
+        re-initialized on first use."""
+        if not self._cell_path:
+            return
+        from bigraph_schema import get_path
+        cell_state = get_path(self.state, self._cell_path)
+        for key, val in cell_state.items():
+            if not isinstance(val, dict) or 'instance' not in val:
+                continue
+            instance = val['instance']
+            if hasattr(instance, 'parameters') and 'process' in instance.parameters:
+                proc = instance.parameters['process']
+                if hasattr(proc, 'request_set'):
+                    proc.request_set = False
+            for attr in list(vars(instance).keys()):
+                if attr.endswith('_idx') or attr == 'molecule_idx' or attr == 'bulk_idx':
+                    setattr(instance, attr, None)
 
     def _ensure_unique_updaters(self):
         """Lazily initialize the shared UniqueNumpyUpdater registry."""
@@ -1021,3 +1102,75 @@ def migrate_composite(core, sim):
                         inject_flow_dependencies(subsubstates, inner_flow)
 
     return state
+
+
+def generate_ecoli_document(outpath='out/ecoli.pickle'):
+    """Build the E. coli composite from EcoliSim and save as a document.
+
+    This is the one-step function that goes from vEcoli's simulation data
+    to a standalone file. Creates an EcoliComposite to ensure the state is
+    fully initialized, then pickles its schema and state.
+
+    Args:
+        outpath: Path for the output file.
+
+    Returns:
+        The path to the saved file.
+    """
+    import os
+    import pickle
+    from contextlib import chdir
+    from bigraph_schema import allocate_core
+    from wholecell.utils.filepath import ROOT_PATH
+    from ecoli.experiments.ecoli_master_sim import EcoliSim, CONFIG_DIR_PATH
+    from genEcoli.types import ECOLI_TYPES
+
+    core = allocate_core()
+    core.register_types(ECOLI_TYPES)
+    core = scan_update(core, 'ecoli.processes')
+
+    with chdir(ROOT_PATH):
+        sim = EcoliSim.from_file(CONFIG_DIR_PATH + "default.json")
+        sim.build_ecoli()
+
+    migrate = migrate_composite(core, sim)
+    inferred = core.infer(migrate)
+
+    document = {
+        'schema': inferred,
+        'state': migrate}
+
+    os.makedirs(os.path.dirname(outpath) or '.', exist_ok=True)
+    with open(outpath, 'wb') as f:
+        pickle.dump(document, f)
+
+    print(f"Saved E. coli document to {outpath}")
+    return outpath
+
+
+def load_ecoli_composite(path='out/ecoli.pickle', core=None):
+    """Load an E. coli composite from a saved document and return it ready to run.
+
+    Args:
+        path: Path to the document produced by generate_ecoli_document.
+        core: Pre-configured bigraph-schema core with ecoli types and
+              processes registered. If None, creates one (requires vEcoli
+              to be importable).
+
+    Returns:
+        An EcoliComposite ready for .run(interval).
+    """
+    import pickle
+
+    if core is None:
+        from bigraph_schema import allocate_core
+        from genEcoli.types import ECOLI_TYPES
+        core = allocate_core()
+        core.register_types(ECOLI_TYPES)
+        core = scan_update(core, 'ecoli.processes')
+
+    with open(path, 'rb') as f:
+        document = pickle.load(f)
+
+    ecoli = EcoliComposite(document, core=core)
+    return ecoli
