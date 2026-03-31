@@ -6,6 +6,12 @@ results match the original vEcoli.
 """
 
 import numpy as np
+from contextlib import chdir
+
+from wholecell.utils.filepath import ROOT_PATH
+from ecoli.experiments.ecoli_master_sim import EcoliSim
+from ecoli.library.schema import not_a_process
+
 from genEcoli import generate_ecoli_document, load_ecoli_composite
 
 
@@ -38,11 +44,6 @@ def test_run():
 
 def test_compare_v1():
     """Compare v2 results against original vEcoli v1 simulation."""
-    from contextlib import chdir
-    from wholecell.utils.filepath import ROOT_PATH
-    from ecoli.experiments.ecoli_master_sim import EcoliSim
-    from ecoli.library.schema import not_a_process
-
     # Run v1
     with chdir(ROOT_PATH):
         sim = EcoliSim.from_file()
