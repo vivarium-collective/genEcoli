@@ -1,6 +1,8 @@
 """Visualization functions for the E. coli composite."""
 
 import os
+import base64
+from datetime import datetime
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -191,16 +193,19 @@ MASS_COLORS = [
 ]
 
 
-def history_to_mass_timeseries(history):
-    """Convert a history dict {time: {key: val}} to mass timeseries arrays.
+def emitter_to_mass_timeseries(emitter):
+    """Convert a RAMEmitter's history to mass timeseries arrays.
+
+    Args:
+        emitter: A RAMEmitter instance (from EcoliComposite.emitter).
 
     Returns:
         dict with 'time' array and arrays for each mass component.
     """
-    times = sorted(history.keys())
-    result = {'time': np.array(times)}
+    history = emitter.history
+    result = {'time': np.array([s.get('global_time', 0.0) for s in history])}
     for label, key in MASS_COMPONENTS.items():
-        result[label] = np.array([history[t].get(key, 0.0) for t in times])
+        result[label] = np.array([s.get(key, 0.0) for s in history])
     return result
 
 
@@ -264,3 +269,150 @@ def plot_mass_fractions(datasets, outpath='out/mass_fraction_summary.png'):
     fig.savefig(outpath, dpi=200)
     plt.close(fig)
     print(f"Saved mass fraction plot to {outpath}")
+
+
+# ---------------------------------------------------------------------------
+# HTML comparison report
+# ---------------------------------------------------------------------------
+
+def _img_to_base64(path):
+    """Read an image file and return a base64-encoded data URI."""
+    if not os.path.exists(path):
+        return ''
+    with open(path, 'rb') as f:
+        data = base64.b64encode(f.read()).decode('utf-8')
+    ext = os.path.splitext(path)[1].lstrip('.')
+    return f'data:image/{ext};base64,{data}'
+
+
+def generate_comparison_report(
+    v1_mass,
+    v2_mass,
+    v1_runtime,
+    v2_runtime,
+    v1_changed,
+    v2_changed,
+    both_changed,
+    bulk_corr,
+    duration,
+    outdir='out',
+):
+    """Generate an HTML report comparing v1 and v2 simulation results.
+
+    Args:
+        v1_mass, v2_mass: Mass timeseries dicts (from emitter/query converters).
+        v1_runtime, v2_runtime: Wall-clock seconds for each run.
+        v1_changed, v2_changed: Number of bulk molecules that changed.
+        both_changed: Number changed in both.
+        bulk_corr: Pearson correlation of shared bulk deltas.
+        duration: Simulated time in seconds.
+        outdir: Output directory for the report and images.
+    """
+    # --- Build component comparison table ---
+    v1_times = set(np.round(v1_mass['time'], 2))
+    v2_times = set(np.round(v2_mass['time'], 2))
+    common_times = sorted(v1_times & v2_times)
+
+    rows = []
+    if len(common_times) >= 2:
+        v1_idx = [i for i, t in enumerate(v1_mass['time']) if round(t, 2) in set(common_times)]
+        v2_idx = [i for i, t in enumerate(v2_mass['time']) if round(t, 2) in set(common_times)]
+
+        for label in MASS_COMPONENTS:
+            v1_vals = v1_mass[label][v1_idx]
+            v2_vals = v2_mass[label][v2_idx]
+            n = min(len(v1_vals), len(v2_vals))
+            v1_vals, v2_vals = v1_vals[:n], v2_vals[:n]
+
+            v1_final = v1_vals[-1] if len(v1_vals) > 0 else 0
+            v2_final = v2_vals[-1] if len(v2_vals) > 0 else 0
+            diff = v2_final - v1_final
+            pct = 100 * diff / v1_final if v1_final != 0 else 0
+
+            if n >= 2 and np.std(v1_vals) > 0 and np.std(v2_vals) > 0:
+                corr = np.corrcoef(v1_vals, v2_vals)[0, 1]
+            else:
+                corr = float('nan')
+
+            rows.append((label, v1_final, v2_final, diff, pct, corr))
+
+    table_html = ''
+    for label, v1f, v2f, diff, pct, corr in rows:
+        color = '#e8f5e9' if abs(pct) < 1 else ('#fff3e0' if abs(pct) < 5 else '#ffebee')
+        corr_str = f'{corr:.4f}' if not np.isnan(corr) else 'N/A'
+        table_html += f'''<tr style="background:{color}">
+            <td>{label}</td><td>{v1f:.2f}</td><td>{v2f:.2f}</td>
+            <td>{diff:+.2f}</td><td>{pct:+.2f}%</td><td>{corr_str}</td></tr>\n'''
+
+    # --- Embed images ---
+    mass_img = _img_to_base64(os.path.join(outdir, 'mass_fraction_summary.png'))
+    bigraph_img = _img_to_base64(os.path.join(outdir, 'ecoli_LR.png'))
+    bigraph_part_img = _img_to_base64(os.path.join(outdir, 'ecoli_partitioned_LR.png'))
+
+    html = f'''<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<title>genEcoli: v1 vs v2 Comparison Report</title>
+<style>
+  body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+         max-width: 1200px; margin: 0 auto; padding: 20px; color: #333; }}
+  h1 {{ border-bottom: 2px solid #2196F3; padding-bottom: 10px; }}
+  h2 {{ color: #1565C0; margin-top: 40px; }}
+  table {{ border-collapse: collapse; width: 100%; margin: 15px 0; }}
+  th, td {{ border: 1px solid #ddd; padding: 8px 12px; text-align: right; }}
+  th {{ background: #1565C0; color: white; }}
+  td:first-child, th:first-child {{ text-align: left; }}
+  .summary {{ display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin: 20px 0; }}
+  .card {{ background: #f5f5f5; border-radius: 8px; padding: 20px; text-align: center; }}
+  .card .value {{ font-size: 2em; font-weight: bold; color: #1565C0; }}
+  .card .label {{ color: #666; margin-top: 5px; }}
+  img {{ max-width: 100%; border: 1px solid #ddd; border-radius: 4px; margin: 10px 0; }}
+  .pass {{ color: #2e7d32; font-weight: bold; }}
+  .warn {{ color: #e65100; font-weight: bold; }}
+  .timestamp {{ color: #999; font-size: 0.9em; }}
+</style></head><body>
+
+<h1>genEcoli: v1 vs v2 Comparison Report</h1>
+<p class="timestamp">Generated {datetime.now().strftime("%Y-%m-%d %H:%M:%S")} | Duration: {duration:.0f}s simulated</p>
+
+<h2>Summary</h2>
+<div class="summary">
+  <div class="card">
+    <div class="value">{bulk_corr:.4f}</div>
+    <div class="label">Bulk delta correlation</div>
+  </div>
+  <div class="card">
+    <div class="value">{v2_runtime:.2f}s</div>
+    <div class="label">v2 runtime ({v2_runtime/v1_runtime:.1f}x vs v1 {v1_runtime:.2f}s)</div>
+  </div>
+  <div class="card">
+    <div class="value">{both_changed}</div>
+    <div class="label">Molecules changed in both (v1: {v1_changed}, v2: {v2_changed})</div>
+  </div>
+</div>
+
+<h2>Mass Fraction Timeseries</h2>
+<img src="{mass_img}" alt="Mass fraction comparison">
+
+<h2>Component Comparison</h2>
+<p>Final values after {duration:.0f}s. Color: <span style="background:#e8f5e9;padding:2px 6px">{'<'}1%</span>
+<span style="background:#fff3e0;padding:2px 6px">1-5%</span>
+<span style="background:#ffebee;padding:2px 6px">{'>'}5%</span> difference.</p>
+<table>
+<tr><th>Component</th><th>v1 final (fg)</th><th>v2 final (fg)</th>
+<th>Difference</th><th>% Diff</th><th>Correlation</th></tr>
+{table_html}
+</table>
+
+<h2>Bigraph Visualization (v2)</h2>
+<h3>Simplified</h3>
+<img src="{bigraph_img}" alt="E. coli bigraph (simplified)">
+<h3>With Partitioning (Requesters / Allocators / Evolvers)</h3>
+<img src="{bigraph_part_img}" alt="E. coli bigraph (partitioned)">
+
+</body></html>'''
+
+    report_path = os.path.join(outdir, 'comparison_report.html')
+    os.makedirs(outdir, exist_ok=True)
+    with open(report_path, 'w') as f:
+        f.write(html)
+    print(f"Saved comparison report to {report_path}")

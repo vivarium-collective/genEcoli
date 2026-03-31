@@ -357,7 +357,10 @@ def _resolve_wire(cell_state, wire_path):
 
 def _build_view(cell_state, edge, instance):
     """Build a state view for a step by following its input wires."""
-    ports = instance.ports_schema()
+    try:
+        ports = instance.ports_schema()
+    except AttributeError:
+        ports = {}
     view = {}
     wires = edge.get('inputs', {})
     for port_name, wire_path in wires.items():
@@ -410,7 +413,6 @@ class EcoliComposite(Composite):
     def __init__(self, config=None, core=None):
         self._unique_updaters = None
         self._cell_path = None
-        self.history = {}  # {time: {key: value}} snapshots collected during run
 
         # Skip initial run_steps during parent init
         original_run_steps = EcoliComposite.run_steps
@@ -453,6 +455,63 @@ class EcoliComposite(Composite):
                         break
             if self._cell_path:
                 break
+
+        # Add RAMEmitter as a step inside the cell state
+        self._setup_emitter()
+
+    def _setup_emitter(self):
+        """Add a RAMEmitter step inside the cell state, wired to mass listener
+        paths and triggered as the last step in the flow via a flow token."""
+        from process_bigraph.emitter import RAMEmitter
+
+        if not self._cell_path:
+            return
+
+        cell_state = get_path(self.state, self._cell_path)
+
+        # Wires are relative to cell state
+        emit_wires = {
+            'global_time': ['global_time'],
+            'protein_mass': ['listeners', 'mass', 'protein_mass'],
+            'dry_mass': ['listeners', 'mass', 'dry_mass'],
+            'rRna_mass': ['listeners', 'mass', 'rRna_mass'],
+            'tRna_mass': ['listeners', 'mass', 'tRna_mass'],
+            'mRna_mass': ['listeners', 'mass', 'mRna_mass'],
+            'dna_mass': ['listeners', 'mass', 'dna_mass'],
+            'smallMolecule_mass': ['listeners', 'mass', 'smallMolecule_mass'],
+        }
+
+        emit_schema = {port: 'node' for port in emit_wires}
+        emitter = RAMEmitter({'emit': emit_schema}, self.core)
+
+        # Find the last flow token to chain the emitter after all other steps
+        max_token = -1
+        for name, edge in cell_state.items():
+            if not isinstance(edge, dict):
+                continue
+            for wire_name, wire_path in edge.get('outputs', {}).items():
+                if isinstance(wire_path, list) and len(wire_path) == 1 and wire_path[0].startswith('_flow_token_'):
+                    token_num = int(wire_path[0].split('_')[-1])
+                    if token_num > max_token:
+                        max_token = token_num
+        if max_token >= 0:
+            emit_wires['_flow_in'] = [f'_flow_token_{max_token}']
+
+        cell_state['emitter'] = {
+            '_type': 'step',
+            'address': 'local:RAMEmitter',
+            'config': {'emit': emit_schema},
+            'inputs': emit_wires,
+            'outputs': {},
+            'instance': emitter,
+            'priority': 0.0,
+        }
+
+        self.emitter = emitter
+
+        # Rebuild step network to include the emitter
+        self.find_instance_paths(self.state)
+        self.build_step_network()
 
     def _init_from_migrated(self, config, core):
         """Initialize from a migrated state that already has process instances.
@@ -520,29 +579,15 @@ class EcoliComposite(Composite):
 
     def apply_updates(self, updates):
         """Override to skip core.apply/realize which would replace state dicts.
-        Also snapshots mass data after each timestep for history collection."""
-        self._snapshot()
+        Syncs global_time from composite root to cell state."""
         if self._cell_path:
+            cell_state = get_path(self.state, self._cell_path)
+            cell_state['global_time'] = self.state.get('global_time', 0.0)
             return [self._cell_path + ('global_time',)]
         return []
 
-    def _snapshot(self):
-        """Record current mass listener values into history."""
-        if not self._cell_path:
-            return
-        cell_state = get_path(self.state, self._cell_path)
-        mass = cell_state.get('listeners', {}).get('mass', {})
-        if not mass:
-            return
-        t = self.state.get('global_time', 0.0)
-        self.history[t] = {k: copy.copy(v) for k, v in mass.items()
-                           if isinstance(v, (int, float))}
-
     def run(self, interval, force_complete=False):
-        """Override to collect state snapshots at t=0 and after completion."""
-        self._snapshot()
         super().run(interval, force_complete=force_complete)
-        self._snapshot()
 
     def run_steps(self, step_paths):
         """Execute steps using v1 updater semantics with proper path tracking."""
@@ -559,8 +604,6 @@ class EcoliComposite(Composite):
                 continue
 
             instance = step['instance']
-            if not hasattr(instance, 'next_update'):
-                continue
 
             cell_state_path = step_path[:-1]
             cell_state = get_path(self.state, cell_state_path)
@@ -569,9 +612,13 @@ class EcoliComposite(Composite):
 
             try:
                 view = _build_view(cell_state, step, instance)
-                view = fill_missing_state(view, instance)
-                timestep = instance.parameters.get('timestep', 1.0)
-                delta = instance.next_update(timestep, view)
+                if hasattr(instance, 'next_update'):
+                    view = fill_missing_state(view, instance)
+                    timestep = instance.parameters.get('timestep', 1.0)
+                    delta = instance.next_update(timestep, view)
+                else:
+                    delta = instance.update(view)
+
                 if delta:
                     apply_step_update(cell_state, step, instance, delta,
                                       unique_updaters=self._unique_updaters)

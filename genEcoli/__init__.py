@@ -6,6 +6,7 @@ from genEcoli.interface import (
 from genEcoli.plot import (
     plot_ecoli_bigraph,
     plot_mass_fractions,
-    history_to_mass_timeseries,
+    emitter_to_mass_timeseries,
     v1_query_to_mass_timeseries,
+    generate_comparison_report,
 )
