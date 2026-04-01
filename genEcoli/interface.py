@@ -222,7 +222,11 @@ def _share_unique_updaters(cell_state, step_order):
 
 
 def _disable_readonly_arrays():
-    """Monkey-patch bulk_numpy_updater to not set arrays read-only."""
+    """Monkey-patch v1 updaters to not set arrays read-only.
+
+    In v1, arrays are locked between steps as a safety measure.
+    In v2's execution model, this causes failures since steps
+    share state via references."""
     if hasattr(ecoli_schema_mod.bulk_numpy_updater, '_patched'):
         return
 
@@ -235,6 +239,18 @@ def _disable_readonly_arrays():
 
     writeable_updater._patched = True
     ecoli_schema_mod.bulk_numpy_updater = writeable_updater
+
+    # Also patch UniqueNumpyUpdater to not set read-only
+    orig_updater = UniqueNumpyUpdater.updater
+
+    @functools.wraps(orig_updater)
+    def writeable_unique_updater(self, current, update):
+        result = orig_updater(self, current, update)
+        if hasattr(result, 'flags'):
+            result.flags.writeable = True
+        return result
+
+    UniqueNumpyUpdater.updater = writeable_unique_updater
 
 
 # ---------------------------------------------------------------------------
@@ -513,8 +529,15 @@ class EcoliComposite(Composite):
 
         self.emitter = emitter
 
-        # Rebuild step network to include the emitter
+        # Rebuild step network and view cache to include the emitter
         self.find_instance_paths(self.state)
+        emitter_path = self._cell_path + ('emitter',)
+        try:
+            compiled = self.core.precompile_link(self.schema, self.state, emitter_path)
+            if compiled is not None:
+                self._compiled_links[emitter_path] = compiled
+        except Exception:
+            pass
         self.build_step_network()
 
     def _init_from_migrated(self, config, core):
@@ -545,12 +568,21 @@ class EcoliComposite(Composite):
 
         self.bridge_updates = []
 
-        # Initialize caches expected by newer process-bigraph versions
-        self._view_cache = {}
-        self._project_cache = {}
-        self._fast_view_paths = {}
-        self._fast_project_paths = {}
-        self._compiled_projects = {}
+        # Initialize caches for optimized view/project operations
+        self._compiled_links = {}
+        if hasattr(self, '_build_view_project_cache'):
+            self._build_view_project_cache()
+
+        # Also precompile step links for fast view in run_steps
+        for path in self.step_paths:
+            if path not in self._compiled_links:
+                try:
+                    compiled = self.core.precompile_link(
+                        self.schema, self.state, path)
+                    if compiled is not None:
+                        self._compiled_links[path] = compiled
+                except Exception:
+                    pass
 
         self.build_step_network()
         self._reset_process_state()
@@ -610,7 +642,10 @@ class EcoliComposite(Composite):
         return []
 
     def run_steps(self, step_paths):
-        """Execute steps using v1 updater semantics with proper path tracking."""
+        """Execute steps using v1 updater semantics with proper path tracking.
+
+        Uses process-bigraph's _cached_view for fast state lookups, then
+        applies v1 updaters in-place via apply_step_update."""
         if not step_paths:
             self.steps_run = set()
             return
@@ -624,14 +659,21 @@ class EcoliComposite(Composite):
                 continue
 
             instance = step['instance']
-
             cell_state_path = step_path[:-1]
             cell_state = get_path(self.state, cell_state_path)
 
-            _make_arrays_writeable(cell_state)
-
             try:
-                view = _build_view(cell_state, step, instance)
+                # Use fast cached view when available, fall back for
+                # nested wires or steps without precompiled views
+                compiled = self._compiled_links.get(step_path)
+                has_fast_view = compiled is not None and compiled.get('view') is not None
+                has_nested_wires = any(
+                    isinstance(w, dict) for w in step.get('inputs', {}).values())
+                if has_fast_view and not has_nested_wires:
+                    view = self._cached_view(step_path)
+                else:
+                    view = _build_view(cell_state, step, instance)
+
                 if hasattr(instance, 'next_update'):
                     view = fill_missing_state(view, instance)
                     timestep = instance.parameters.get('timestep', 1.0)
@@ -643,6 +685,7 @@ class EcoliComposite(Composite):
                     apply_step_update(cell_state, step, instance, delta,
                                       unique_updaters=self._unique_updaters)
 
+                # Report all output wire paths for cascade triggering
                 output_wires = step.get('outputs', {})
                 for port_name, wire_path in output_wires.items():
                     if isinstance(wire_path, list) and wire_path:
