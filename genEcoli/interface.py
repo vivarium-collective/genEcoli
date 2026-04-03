@@ -1091,9 +1091,13 @@ def migrate_composite(core, sim):
     for path_key, substates in state.items():
         if isinstance(substates, dict):
             subflow = flow.get(path_key, {})
+            if not isinstance(subflow, dict):
+                continue
             for subkey, subsubstates in substates.items():
                 if isinstance(subsubstates, dict):
                     inner_flow = subflow.get(subkey, {})
+                    if not isinstance(inner_flow, dict):
+                        continue
                     if inner_flow:
                         priorities = extract_flow_priorities(inner_flow)
                         for step_name, priority in priorities.items():
