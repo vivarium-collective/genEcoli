@@ -25,6 +25,7 @@ from ecoli.experiments.ecoli_master_sim import EcoliSim, CONFIG_DIR_PATH
 from genEcoli.types.process import translate_ports
 from genEcoli.types import ECOLI_TYPES
 from genEcoli.plot import plot_ecoli_bigraph
+from genEcoli.export import export_state_json
 
 
 __all__ = [
@@ -1099,6 +1100,8 @@ def generate_ecoli_document(outpath='out/ecoli.pickle'):
 
     plot_ecoli_bigraph(document, outpath)
     plot_ecoli_bigraph(document, outpath, show_partitioning=True)
+
+    export_state_json(document, outdir=os.path.dirname(outpath) or '.')
 
     return outpath
 
