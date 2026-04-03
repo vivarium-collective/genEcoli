@@ -47,13 +47,17 @@ class _StateEncoder(json.JSONEncoder):
         return str(obj)
 
 
+SKIP_PORTS = {'allocate', 'process', 'next_update_time', 'process_state'}
+
+
 def _clean_wires(wires):
-    """Remove allocate/request/flow wires from a wire dict."""
+    """Remove partitioning infrastructure wires from a wire dict."""
     if not isinstance(wires, dict):
         return wires
     return {
         port: wire for port, wire in wires.items()
         if '_flow' not in port
+        and port not in SKIP_PORTS
         and not (isinstance(wire, list) and wire and wire[0] in ('request', 'allocate'))
     }
 
@@ -88,7 +92,7 @@ def _strip_partitioning(agent):
 
         if _is_step(v):
             entry = dict(v)
-            for field in ('inputs', '_inputs', '_outputs'):
+            for field in ('inputs', '_inputs', 'outputs', '_outputs'):
                 if field in entry:
                     entry[field] = _clean_wires(entry[field])
             result[name] = entry
