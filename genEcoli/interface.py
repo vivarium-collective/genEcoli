@@ -13,7 +13,10 @@ from bigraph_schema.schema import Node, Overwrite
 from bigraph_schema.methods import infer, render
 from bigraph_schema.protocols import local_lookup_module
 from process_bigraph import Composite, Process as BigraphProcess, Step as BigraphStep
-from process_bigraph.composite import empty_front
+from process_bigraph.composite import (
+    empty_front, find_leaves, explode_path, assert_interface,
+    find_step_triggers, merge_collections, build_trigger_state,
+)
 
 from contextlib import chdir
 
@@ -25,6 +28,7 @@ from ecoli.experiments.ecoli_master_sim import EcoliSim, CONFIG_DIR_PATH
 from genEcoli.types.process import translate_ports
 from genEcoli.types import ECOLI_TYPES
 from genEcoli.plot import plot_ecoli_bigraph
+from genEcoli.classify_ports import split_wires, remove_bulk_total_from_outputs, classify_step
 
 
 __all__ = [
@@ -89,9 +93,6 @@ def apply_step_update(cell_state, edge, instance, delta, unique_updaters=None):
     output_wires = edge.get('outputs', {})
 
     for port_name, update_value in delta.items():
-        if port_name.startswith('_flow_'):
-            continue
-
         wire_path = output_wires.get(port_name)
         if wire_path is None:
             continue
@@ -488,19 +489,10 @@ class EcoliComposite(Composite):
         emit_schema = {port: 'node' for port in emit_wires}
         emitter = RAMEmitter({'emit': emit_schema}, self.core)
 
-        # Find the last flow token to chain the emitter after all other steps
-        max_token = -1
-        for name, edge in cell_state.items():
-            if not isinstance(edge, dict):
-                continue
-            for wire_name, wire_path in edge.get('outputs', {}).items():
-                if isinstance(wire_path, list) and len(wire_path) == 1 and wire_path[0].startswith('_flow_token_'):
-                    token_num = int(wire_path[0].split('_')[-1])
-                    if token_num > max_token:
-                        max_token = token_num
-        if max_token >= 0:
-            emit_wires['_flow_in'] = [f'_flow_token_{max_token}']
-
+        # The emitter depends on listener outputs (listeners.mass.*).
+        # Since it reads from listeners, it will naturally run after
+        # any step that writes to listeners. Priority 0.0 ensures it
+        # runs last if there are cycles.
         cell_state['emitter'] = {
             '_type': 'step',
             'address': 'local:RAMEmitter',
@@ -551,6 +543,7 @@ class EcoliComposite(Composite):
         self._fast_view_paths = {}
         self._fast_project_paths = {}
         self._compiled_projects = {}
+        self._compiled_links = {}
 
         self.build_step_network()
         self._reset_process_state()
@@ -595,6 +588,83 @@ class EcoliComposite(Composite):
             self._unique_updaters = _share_unique_updaters(cell_state, step_names)
         else:
             self._unique_updaters = {}
+
+    def build_step_network(self):
+        """Override to include self-loop dependencies.
+
+        The upstream build_step_network filters out output paths that
+        overlap with the step's own inputs (to prevent self-triggering).
+        But for the E. coli model, many steps both read and write to the
+        same paths (e.g., evolvers read+write 'bulk'). Without self-loops,
+        the dependency graph is too sparse and steps run out of order.
+
+        Self-loops create trivial cycles that the priority-based cycle
+        detection handles correctly: the highest-priority step in the
+        cycle runs first, then the next, etc.
+        """
+        # --- Standard trigger setup (copied from Composite.build_step_network) ---
+        self.step_triggers = {}
+        self.star_triggers = {}
+
+        for step_path, step in self.step_paths.items():
+            step_triggers = find_step_triggers(step_path, step)
+            self.step_triggers = merge_collections(self.step_triggers, step_triggers)
+
+        for trigger_path in self.step_triggers:
+            if "*" in trigger_path:
+                self.star_triggers[trigger_path] = self.step_triggers[trigger_path]
+
+        self.steps_run = set()
+
+        # --- Build dependency graph WITH self-loops ---
+        ancestors = {
+            step_key: {'input_paths': None, 'output_paths': None, 'priority': None}
+            for step_key in self.step_paths
+        }
+        nodes = {}
+
+        for step_key, step in self.step_paths.items():
+            schema = step['instance'].interface()
+            assert_interface(schema)
+
+            if ancestors[step_key]['input_paths'] is None:
+                ancestors[step_key]['input_paths'] = find_leaves(
+                    step['inputs'], path=step_key[:-1])
+            if ancestors[step_key]['output_paths'] is None:
+                # Use _dep_outputs (narrowed) for the dependency graph,
+                # falling back to outputs (full) if not present.
+                dep_out = step.get('_dep_outputs', step.get('outputs', {}))
+                ancestors[step_key]['output_paths'] = find_leaves(
+                    dep_out, path=step_key[:-1])
+            if ancestors[step_key]['priority'] is None:
+                ancestors[step_key]['priority'] = step.get('priority', 0.0)
+
+            input_paths = ancestors[step_key]['input_paths'] or []
+            output_paths = ancestors[step_key]['output_paths'] or []
+
+            for input_path in input_paths:
+                path = tuple(input_path)
+                nodes.setdefault(path, {'before': set(), 'after': set()})
+                nodes[path]['after'].add(step_key)
+
+            for output_path in output_paths:
+                exploded_path = explode_path(output_path)[1:]
+                for explode in exploded_path:
+                    # NOTE: Removed the `if explode not in input_paths`
+                    # filter to include self-loop dependencies. This
+                    # creates cycles for shared-path steps, resolved by
+                    # priority-based cycle breaking.
+                    path = tuple(explode)
+                    nodes.setdefault(path, {'before': set(), 'after': set()})
+                    nodes[path]['before'].add(step_key)
+
+        self.step_dependencies = ancestors
+        self.node_dependencies = nodes
+
+        # --- Standard initialization ---
+        self.reset_step_state(self.step_paths)
+        self.to_run = self.cycle_step_state()
+        self.clean_front(self.state)
 
     def expire_process_paths(self, update_paths):
         """No-op -- process paths don't change during v1 simulation."""
@@ -826,7 +896,7 @@ def list_paths(path):
         return {key: list_paths(subpath) for key, subpath in path.items()}
 
 
-def translate_processes(core, tree, topology=None, edge_type=None):
+def translate_processes(core, tree, topology=None, edge_type=None, step_name=None):
     if isinstance(tree, BigraphEdge):
         cls = type(tree)
         tree.core = core
@@ -846,6 +916,13 @@ def translate_processes(core, tree, topology=None, edge_type=None):
             topology = tree.topology
         wires = list_paths(topology)
 
+        # Split wires: inputs stay full (for view building + update routing),
+        # _dep_outputs is narrowed (for the dependency graph only).
+        _input_wires, dep_output_wires = split_wires(
+            step_name or cls.__name__, tree, wires)
+        dep_output_wires = remove_bulk_total_from_outputs(
+            step_name or cls.__name__, dep_output_wires)
+
         state.update({
             '_type': type_name,
             'address': f'local:{cls.__name__}',
@@ -854,13 +931,15 @@ def translate_processes(core, tree, topology=None, edge_type=None):
             '_outputs': tree.outputs(),
             'instance': tree,
             'inputs': copy.deepcopy(wires),
-            'outputs': copy.deepcopy(wires)})
+            'outputs': copy.deepcopy(wires),
+            '_dep_outputs': copy.deepcopy(dep_output_wires)})
         return state
 
     elif isinstance(tree, dict):
         return {key: translate_processes(core, subtree,
                     topology[key] if topology else None,
-                    edge_type=edge_type)
+                    edge_type=edge_type,
+                    step_name=key)
                 for key, subtree in tree.items()}
     else:
         return tree
@@ -1003,6 +1082,11 @@ def migrate_composite(core, sim):
 
     state = deep_merge(processes, steps)
     state = deep_merge(state, sim.generated_initial_state)
+
+    # Assign priorities from the v1 flow ordering.
+    # Priorities are used by the v2 engine to break cycles in the
+    # implicit dependency graph (e.g., steps that share 'bulk').
+    # Flow tokens are NOT injected — dependencies come from port overlap.
     flow = sim.ecoli.flow
     for path_key, substates in state.items():
         if isinstance(substates, dict):
@@ -1015,7 +1099,6 @@ def migrate_composite(core, sim):
                         for step_name, priority in priorities.items():
                             if isinstance(subsubstates.get(step_name), dict):
                                 subsubstates[step_name]['priority'] = priority
-                        inject_flow_dependencies(subsubstates, inner_flow)
 
     return state
 
