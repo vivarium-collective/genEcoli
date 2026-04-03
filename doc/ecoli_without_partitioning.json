@@ -20,9 +20,6 @@
             ],
             "timestep": [
               "timestep"
-            ],
-            "_flow_in_41": [
-              "_flow_token_40"
             ]
           },
           "outputs": {
@@ -63,9 +60,6 @@
             ],
             "timestep": [
               "timestep"
-            ],
-            "_flow_in_42": [
-              "_flow_token_41"
             ]
           },
           "outputs": {
@@ -158,10 +152,6 @@
             "timestep": [
               "timestep"
             ],
-            "allocate": [
-              "allocate",
-              "ecoli-chromosome-replication"
-            ],
             "next_update_time": [
               "next_update_time",
               "ecoli-chromosome-replication"
@@ -172,9 +162,6 @@
             ],
             "global_time": [
               "global_time"
-            ],
-            "_flow_in_24": [
-              "_flow_token_23"
             ]
           },
           "outputs": {
@@ -292,9 +279,6 @@
             "next_update_time": [
               "next_update_time",
               "chromosome_structure"
-            ],
-            "_flow_in_37": [
-              "_flow_token_36"
             ]
           },
           "outputs": {
@@ -405,10 +389,6 @@
             "timestep": [
               "timestep"
             ],
-            "allocate": [
-              "allocate",
-              "ecoli-complexation"
-            ],
             "next_update_time": [
               "next_update_time",
               "ecoli-complexation"
@@ -419,9 +399,6 @@
             ],
             "global_time": [
               "global_time"
-            ],
-            "_flow_in_25": [
-              "_flow_token_24"
             ]
           },
           "outputs": {
@@ -496,10 +473,6 @@
             "timestep": [
               "timestep"
             ],
-            "allocate": [
-              "allocate",
-              "ecoli-equilibrium"
-            ],
             "next_update_time": [
               "next_update_time",
               "ecoli-equilibrium"
@@ -510,9 +483,6 @@
             ],
             "global_time": [
               "global_time"
-            ],
-            "_flow_in_11": [
-              "_flow_token_10"
             ]
           },
           "outputs": {
@@ -566,9 +536,6 @@
             ],
             "timestep": [
               "timestep"
-            ],
-            "_flow_in_43": [
-              "_flow_token_42"
             ]
           },
           "outputs": {
@@ -686,9 +653,6 @@
             "next_update_time": [
               "next_update_time",
               "metabolism"
-            ],
-            "_flow_in_39": [
-              "_flow_token_38"
             ]
           },
           "outputs": {
@@ -800,10 +764,6 @@
             "timestep": [
               "timestep"
             ],
-            "allocate": [
-              "allocate",
-              "ecoli-polypeptide-elongation"
-            ],
             "next_update_time": [
               "next_update_time",
               "ecoli-polypeptide-elongation"
@@ -814,9 +774,6 @@
             ],
             "global_time": [
               "global_time"
-            ],
-            "_flow_in_34": [
-              "_flow_token_33"
             ]
           },
           "outputs": {
@@ -925,10 +882,6 @@
             "timestep": [
               "timestep"
             ],
-            "allocate": [
-              "allocate",
-              "ecoli-polypeptide-initiation"
-            ],
             "next_update_time": [
               "next_update_time",
               "ecoli-polypeptide-initiation"
@@ -939,9 +892,6 @@
             ],
             "global_time": [
               "global_time"
-            ],
-            "_flow_in_26": [
-              "_flow_token_25"
             ]
           },
           "outputs": {
@@ -1022,10 +972,6 @@
             "timestep": [
               "timestep"
             ],
-            "allocate": [
-              "allocate",
-              "ecoli-protein-degradation"
-            ],
             "next_update_time": [
               "next_update_time",
               "ecoli-protein-degradation"
@@ -1036,9 +982,6 @@
             ],
             "global_time": [
               "global_time"
-            ],
-            "_flow_in_27": [
-              "_flow_token_26"
             ]
           },
           "outputs": {
@@ -1122,10 +1065,6 @@
             "timestep": [
               "timestep"
             ],
-            "allocate": [
-              "allocate",
-              "ecoli-rna-degradation"
-            ],
             "next_update_time": [
               "next_update_time",
               "ecoli-rna-degradation"
@@ -1136,9 +1075,6 @@
             ],
             "global_time": [
               "global_time"
-            ],
-            "_flow_in_28": [
-              "_flow_token_27"
             ]
           },
           "outputs": {
@@ -1223,10 +1159,6 @@
             "listeners": [
               "listeners"
             ],
-            "allocate": [
-              "allocate",
-              "ecoli-rna-maturation"
-            ],
             "next_update_time": [
               "next_update_time",
               "ecoli-rna-maturation"
@@ -1237,9 +1169,6 @@
             ],
             "global_time": [
               "global_time"
-            ],
-            "_flow_in_12": [
-              "_flow_token_11"
             ]
           },
           "outputs": {
@@ -1301,9 +1230,6 @@
             ],
             "global_time": [
               "global_time"
-            ],
-            "_flow_in_15": [
-              "_flow_token_14"
             ]
           },
           "outputs": {
@@ -1358,9 +1284,6 @@
             "next_update_time": [
               "next_update_time",
               "tf_unbinding"
-            ],
-            "_flow_in_4": [
-              "_flow_token_3"
             ]
           },
           "outputs": {
@@ -1450,10 +1373,6 @@
             "timestep": [
               "timestep"
             ],
-            "allocate": [
-              "allocate",
-              "ecoli-transcript-elongation"
-            ],
             "next_update_time": [
               "next_update_time",
               "ecoli-transcript-elongation"
@@ -1464,9 +1383,6 @@
             ],
             "global_time": [
               "global_time"
-            ],
-            "_flow_in_35": [
-              "_flow_token_34"
             ]
           },
           "outputs": {
@@ -1584,10 +1500,6 @@
             "timestep": [
               "timestep"
             ],
-            "allocate": [
-              "allocate",
-              "ecoli-transcript-initiation"
-            ],
             "next_update_time": [
               "next_update_time",
               "ecoli-transcript-initiation"
@@ -1598,9 +1510,6 @@
             ],
             "global_time": [
               "global_time"
-            ],
-            "_flow_in_29": [
-              "_flow_token_28"
             ]
           },
           "outputs": {
@@ -1694,10 +1603,6 @@
             "timestep": [
               "timestep"
             ],
-            "allocate": [
-              "allocate",
-              "ecoli-two-component-system"
-            ],
             "next_update_time": [
               "next_update_time",
               "ecoli-two-component-system"
@@ -1708,9 +1613,6 @@
             ],
             "global_time": [
               "global_time"
-            ],
-            "_flow_in_13": [
-              "_flow_token_12"
             ]
           },
           "outputs": {
@@ -1764,9 +1666,6 @@
             ],
             "timestep": [
               "timestep"
-            ],
-            "_flow_in_44": [
-              "_flow_token_43"
             ]
           },
           "outputs": {
@@ -1817,9 +1716,6 @@
             ],
             "timestep": [
               "timestep"
-            ],
-            "_flow_in_45": [
-              "_flow_token_44"
             ]
           },
           "outputs": {
@@ -1876,9 +1772,6 @@
             "next_update_time": [
               "next_update_time",
               "ribosome_data_listener"
-            ],
-            "_flow_in_46": [
-              "_flow_token_45"
             ]
           },
           "outputs": {
@@ -1932,9 +1825,6 @@
             ],
             "timestep": [
               "timestep"
-            ],
-            "_flow_in_47": [
-              "_flow_token_46"
             ]
           },
           "outputs": {
@@ -1992,9 +1882,6 @@
             "next_update_time": [
               "next_update_time",
               "rnap_data_listener"
-            ],
-            "_flow_in_48": [
-              "_flow_token_47"
             ]
           },
           "outputs": {
@@ -2046,9 +1933,6 @@
             ],
             "timestep": [
               "timestep"
-            ],
-            "_flow_in_49": [
-              "_flow_token_48"
             ]
           },
           "outputs": {
@@ -805917,41 +805801,6 @@
               "magnitude": 0.0
             }
           }
-        },
-        "process": {
-          "ecoli-chromosome-replication": [
-            "<ecoli.processes.chromosome_replication.ChromosomeReplication object at 0x142e494f0>"
-          ],
-          "ecoli-complexation": [
-            "<ecoli.processes.complexation.Complexation object at 0x142e49880>"
-          ],
-          "ecoli-equilibrium": [
-            "<ecoli.processes.equilibrium.Equilibrium object at 0x142e49b50>"
-          ],
-          "ecoli-polypeptide-elongation": [
-            "<ecoli.processes.polypeptide_elongation.PolypeptideElongation object at 0x145a8ff50>"
-          ],
-          "ecoli-polypeptide-initiation": [
-            "<ecoli.processes.polypeptide_initiation.PolypeptideInitiation object at 0x145f65f40>"
-          ],
-          "ecoli-protein-degradation": [
-            "<ecoli.processes.protein_degradation.ProteinDegradation object at 0x145a8f9e0>"
-          ],
-          "ecoli-rna-degradation": [
-            "<ecoli.processes.rna_degradation.RnaDegradation object at 0x145a8f860>"
-          ],
-          "ecoli-rna-maturation": [
-            "<ecoli.processes.rna_maturation.RnaMaturation object at 0x145a8f6b0>"
-          ],
-          "ecoli-transcript-elongation": [
-            "<ecoli.processes.transcript_elongation.TranscriptElongation object at 0x141227e00>"
-          ],
-          "ecoli-transcript-initiation": [
-            "<ecoli.processes.transcript_initiation.TranscriptInitiation object at 0x145ae8260>"
-          ],
-          "ecoli-two-component-system": [
-            "<ecoli.processes.two_component_system.TwoComponentSystem object at 0x145ae8410>"
-          ]
         },
         "listeners": {
           "mass": {
