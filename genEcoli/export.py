@@ -107,7 +107,7 @@ def export_state_json(document, outdir='doc'):
         outdir: Directory to write JSON files into.
 
     Returns:
-        Tuple of (with_partitioning_path, without_partitioning_path).
+        Tuple of (with_partitioning_path, wcm_path).
     """
     os.makedirs(outdir, exist_ok=True)
     schema = document.get('schema', {})
@@ -120,8 +120,8 @@ def export_state_json(document, outdir='doc'):
     with open(with_path, 'w') as f:
         f.write(encoder.encode({'schema': schema, 'state': document['state']}))
 
-    # Without partitioning — cleaned
-    without_path = os.path.join(outdir, 'ecoli_without_partitioning.json')
+    # Without partitioning — cleaned (wcm = whole-cell model view)
+    without_path = os.path.join(outdir, 'ecoli_wcm.json')
     cleaned_agent = _strip_partitioning(agent)
     with open(without_path, 'w') as f:
         f.write(encoder.encode({'schema': schema, 'state': {'agents': {'0': cleaned_agent}}}))
