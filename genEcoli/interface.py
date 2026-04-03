@@ -1,0 +1,1081 @@
+import os
+import copy
+import dill
+import inspect
+import functools
+
+import numpy as np
+
+from vivarium.core.process import Process as VivariumProcess, Step as VivariumStep
+
+from bigraph_schema import deep_merge, Edge as BigraphEdge, get_path, allocate_core
+from bigraph_schema.schema import Node, Overwrite
+from bigraph_schema.methods import infer, render
+from bigraph_schema.protocols import local_lookup_module
+from process_bigraph import Composite, Process as BigraphProcess, Step as BigraphStep
+from process_bigraph.composite import empty_front
+
+from contextlib import chdir
+
+import ecoli.library.schema as ecoli_schema_mod
+from ecoli.library.schema import UniqueNumpyUpdater, bulk_numpy_updater
+from wholecell.utils.filepath import ROOT_PATH
+from ecoli.experiments.ecoli_master_sim import EcoliSim, CONFIG_DIR_PATH
+
+from genEcoli.types.process import translate_ports
+from genEcoli.types import ECOLI_TYPES
+from genEcoli.plot import plot_ecoli_bigraph
+
+
+__all__ = [
+    'EcoliComposite',
+    'generate_ecoli_document',
+    'load_ecoli_composite',
+    'plot_ecoli_bigraph',
+]
+
+
+# ---------------------------------------------------------------------------
+# v1 update helpers
+# ---------------------------------------------------------------------------
+
+def _deep_update(target, source):
+    """Recursively update target dict with source dict."""
+    for key, value in source.items():
+        if key in target and isinstance(target[key], dict) and isinstance(value, dict):
+            _deep_update(target[key], value)
+        else:
+            target[key] = value
+
+
+def apply_v1_update_in_place(process, state, delta):
+    """Apply v1 updates directly to the state dict (modifies in place)."""
+    if not delta:
+        return
+
+    try:
+        ports = process.ports_schema()
+    except Exception:
+        return
+
+    for key, update_value in delta.items():
+        port = ports.get(key, {})
+        updater = port.get('_updater') if isinstance(port, dict) else None
+        current = state.get(key)
+
+        if updater == 'set' or key in ('next_update_time', 'process'):
+            state[key] = update_value
+        elif callable(updater):
+            if current is not None:
+                try:
+                    updater(current, update_value)
+                except Exception:
+                    state[key] = update_value
+        elif isinstance(update_value, dict) and isinstance(current, dict):
+            _deep_update(current, update_value)
+        elif isinstance(update_value, (int, float)) and isinstance(current, (int, float)):
+            state[key] = current + update_value
+        elif update_value is not None:
+            state[key] = update_value
+
+
+def apply_step_update(cell_state, edge, instance, delta, unique_updaters=None):
+    """Apply a step's delta update to cell_state by following output wire paths."""
+    try:
+        ports = instance.ports_schema()
+    except Exception:
+        return
+
+    output_wires = edge.get('outputs', {})
+
+    for port_name, update_value in delta.items():
+        if port_name.startswith('_flow_'):
+            continue
+
+        wire_path = output_wires.get(port_name)
+        if wire_path is None:
+            continue
+
+        if isinstance(wire_path, dict):
+            _apply_nested_wire_update(cell_state, wire_path, update_value)
+            continue
+
+        if not isinstance(wire_path, list) or not wire_path:
+            continue
+
+        port = ports.get(port_name, {})
+        updater = port.get('_updater') if isinstance(port, dict) else None
+
+        target = cell_state
+        for segment in wire_path[:-1]:
+            if isinstance(target, dict):
+                if segment not in target:
+                    target[segment] = {}
+                target = target[segment]
+            else:
+                target = None
+                break
+
+        if not isinstance(target, dict):
+            continue
+
+        key = wire_path[-1]
+
+        if updater == 'set' or port_name in ('next_update_time', 'process'):
+            target[key] = update_value
+        elif callable(updater):
+            current = target.get(key)
+            if current is not None:
+                if isinstance(current, np.ndarray):
+                    try:
+                        current.flags.writeable = True
+                    except ValueError:
+                        current = current.copy()
+                        current.flags.writeable = True
+                        target[key] = current
+                wire_key = tuple(wire_path) if isinstance(wire_path, list) else None
+                if (unique_updaters and wire_key and wire_key in unique_updaters
+                        and hasattr(updater, '__self__')
+                        and isinstance(updater.__self__, UniqueNumpyUpdater)):
+                    shared_updater = unique_updaters[wire_key]
+                    result = shared_updater.updater(current, update_value)
+                    if result is not current:
+                        target[key] = result
+                else:
+                    updater(current, update_value)
+        elif isinstance(update_value, dict):
+            current = target.get(key)
+            if isinstance(current, dict):
+                _deep_update(current, update_value)
+            else:
+                target[key] = update_value
+        elif isinstance(update_value, (int, float)):
+            current = target.get(key)
+            if isinstance(current, (int, float)):
+                target[key] = current + update_value
+            else:
+                target[key] = update_value
+        elif update_value is not None:
+            target[key] = update_value
+
+
+# ---------------------------------------------------------------------------
+# Array / readonly helpers
+# ---------------------------------------------------------------------------
+
+def _make_arrays_writeable(state):
+    """Recursively make all numpy arrays in the state writeable."""
+    if isinstance(state, dict):
+        for key, value in state.items():
+            if isinstance(value, np.ndarray):
+                if not value.flags.writeable:
+                    state[key] = value.copy()
+                    state[key].flags.writeable = True
+            elif hasattr(value, 'struct_array'):
+                arr = value.struct_array
+                if isinstance(arr, np.ndarray) and not arr.flags.writeable:
+                    value.struct_array = arr.copy()
+                    value.struct_array.flags.writeable = True
+            elif hasattr(value, 'flags') and hasattr(value.flags, 'writeable'):
+                if not value.flags.writeable:
+                    try:
+                        value.flags.writeable = True
+                    except ValueError:
+                        state[key] = value.copy()
+            elif isinstance(value, dict):
+                _make_arrays_writeable(value)
+
+
+def _share_unique_updaters(cell_state, step_order):
+    """Create a shared registry of UniqueNumpyUpdater instances, one per
+    unique molecule wire path."""
+    shared = {}
+
+    for step_name in step_order:
+        edge = cell_state.get(step_name)
+        if not isinstance(edge, dict) or 'instance' not in edge:
+            continue
+        instance = edge['instance']
+        if not hasattr(instance, 'ports_schema'):
+            continue
+        try:
+            ports = instance.ports_schema()
+        except Exception:
+            continue
+        output_wires = edge.get('outputs', {})
+        for port_name, port in ports.items():
+            if not isinstance(port, dict):
+                continue
+            updater = port.get('_updater')
+            if updater is None or not hasattr(updater, '__self__'):
+                continue
+            if not isinstance(updater.__self__, UniqueNumpyUpdater):
+                continue
+            wire_path = output_wires.get(port_name)
+            if not isinstance(wire_path, list):
+                continue
+            wire_key = tuple(wire_path)
+            if wire_key not in shared:
+                shared[wire_key] = UniqueNumpyUpdater()
+
+    return shared
+
+
+def _disable_readonly_arrays():
+    """Monkey-patch bulk_numpy_updater to not set arrays read-only."""
+    if hasattr(ecoli_schema_mod.bulk_numpy_updater, '_patched'):
+        return
+
+    @functools.wraps(bulk_numpy_updater)
+    def writeable_updater(current, update):
+        current.flags.writeable = True
+        for idx, value in update:
+            current["count"][idx] += value
+        return current
+
+    writeable_updater._patched = True
+    ecoli_schema_mod.bulk_numpy_updater = writeable_updater
+
+
+# ---------------------------------------------------------------------------
+# State view helpers
+# ---------------------------------------------------------------------------
+
+def fill_missing_state(state, process):
+    """Fill in missing state keys with defaults from ports_schema."""
+    try:
+        ports = process.ports_schema()
+    except Exception:
+        return state
+
+    for key, port in ports.items():
+        if key.startswith('_'):
+            continue
+        if key not in state and isinstance(port, dict):
+            if '_default' in port:
+                state[key] = port['_default']
+            else:
+                defaults = extract_defaults(port)
+                if defaults:
+                    state[key] = defaults
+
+    return state
+
+
+def extract_defaults(schema):
+    """Recursively extract non-empty _default values from a v1 ports_schema dict."""
+    result = {}
+    if not isinstance(schema, dict):
+        return result
+    for key, value in schema.items():
+        if key.startswith('_'):
+            continue
+        if isinstance(value, dict):
+            if '_default' in value:
+                default = value['_default']
+                try:
+                    is_empty = default is None or (isinstance(default, (list, dict, tuple)) and len(default) == 0)
+                except (TypeError, ValueError):
+                    is_empty = False
+                if not is_empty:
+                    result[key] = default
+            else:
+                sub = extract_defaults(value)
+                if sub:
+                    result[key] = sub
+    return result
+
+
+def _apply_nested_wire_update(cell_state, wire_dict, update_value):
+    """Apply an update through a nested wire dict (v1 nested topology)."""
+    if not isinstance(update_value, dict):
+        base_path = wire_dict.get('_path')
+        if base_path and isinstance(base_path, list):
+            _set_at_path(cell_state, base_path, update_value)
+        return
+
+    base_path = wire_dict.get('_path')
+    for sub_key, sub_value in update_value.items():
+        sub_wire = wire_dict.get(sub_key)
+        if sub_wire is not None:
+            if isinstance(sub_wire, list):
+                _set_at_path(cell_state, sub_wire, sub_value)
+            elif isinstance(sub_wire, dict):
+                _apply_nested_wire_update(cell_state, sub_wire, sub_value)
+        elif base_path and isinstance(base_path, list):
+            _set_at_path(cell_state, base_path + [sub_key], sub_value)
+
+
+def _set_at_path(state, path, value):
+    """Set a value at a path in a nested dict, merging dicts."""
+    target = state
+    for segment in path[:-1]:
+        if isinstance(target, dict):
+            if segment not in target:
+                target[segment] = {}
+            target = target[segment]
+        else:
+            return
+    if isinstance(target, dict) and path:
+        key = path[-1]
+        current = target.get(key)
+        if isinstance(value, dict) and isinstance(current, dict):
+            _deep_update(current, value)
+        else:
+            target[key] = value
+
+
+def _resolve_wire(cell_state, wire_path):
+    """Resolve a wire path to a value in cell_state. Returns None if not found."""
+    if isinstance(wire_path, list) and wire_path:
+        current = cell_state
+        for segment in wire_path:
+            if isinstance(current, dict):
+                current = current.get(segment)
+            else:
+                return None
+        return current
+    elif isinstance(wire_path, dict):
+        base_path = wire_path.get('_path')
+        if base_path:
+            result = _resolve_wire(cell_state, base_path)
+            if result is not None and isinstance(result, dict):
+                result = copy.copy(result)
+            else:
+                result = {}
+        else:
+            result = {}
+        for sub_key, sub_path in wire_path.items():
+            if sub_key == '_path':
+                continue
+            sub_val = _resolve_wire(cell_state, sub_path)
+            if sub_val is not None:
+                result[sub_key] = sub_val
+        return result
+    return None
+
+
+def _build_view(cell_state, edge, instance):
+    """Build a state view for a step by following its input wires."""
+    try:
+        ports = instance.ports_schema()
+    except AttributeError:
+        ports = {}
+    view = {}
+    wires = edge.get('inputs', {})
+    for port_name, wire_path in wires.items():
+        resolved = _resolve_wire(cell_state, wire_path)
+        if resolved is not None:
+            view[port_name] = resolved
+        elif port_name in ports and isinstance(ports[port_name], dict) and '_default' in ports[port_name]:
+            view[port_name] = ports[port_name]['_default']
+    return view
+
+
+def _apply_dict_updates(cell_state, output_wires, update):
+    """Apply only dict-valued updates from a step back into the state."""
+    for port_name, value in update.items():
+        if not isinstance(value, dict):
+            continue
+        wire_path = output_wires.get(port_name)
+        if not isinstance(wire_path, list) or not wire_path:
+            continue
+        target = cell_state
+        for segment in wire_path[:-1]:
+            if isinstance(target, dict):
+                if segment not in target:
+                    target[segment] = {}
+                target = target[segment]
+            else:
+                break
+        if isinstance(target, dict):
+            last = wire_path[-1]
+            if last not in target:
+                target[last] = {}
+            if isinstance(target[last], dict):
+                target[last].update(value)
+
+
+# ---------------------------------------------------------------------------
+# EcoliComposite
+# ---------------------------------------------------------------------------
+
+class EcoliComposite(Composite):
+    """Composite subclass with v1-compatible step execution.
+
+    Overrides run_steps to apply v1 updaters in-place (via apply_step_update)
+    while returning proper update paths so the Composite's trigger/cascade
+    system can order downstream steps correctly.
+
+    This allows using Composite.run() instead of a custom execution loop.
+    """
+
+    def __init__(self, config=None, core=None):
+        self._unique_updaters = None
+        self._cell_path = None
+
+        # Skip initial run_steps during parent init
+        original_run_steps = EcoliComposite.run_steps
+        EcoliComposite.run_steps = lambda self, x: None
+
+        # Check if state already has process instances (loaded from pickle)
+        state = config.get('state', {}) if isinstance(config, dict) else {}
+        has_instances = False
+        for lv1 in state.values():
+            if not isinstance(lv1, dict):
+                continue
+            for lv2 in lv1.values():
+                if not isinstance(lv2, dict):
+                    continue
+                for lv3 in lv2.values():
+                    if isinstance(lv3, dict) and 'instance' in lv3:
+                        has_instances = True
+                        break
+                if has_instances:
+                    break
+            if has_instances:
+                break
+
+        if has_instances:
+            self._init_from_migrated(config, core)
+        else:
+            super().__init__(config, core=core)
+
+        EcoliComposite.run_steps = original_run_steps
+
+        _make_arrays_writeable(self.state)
+        _disable_readonly_arrays()
+
+        # Cache cell state path
+        for path_key, substates in self.state.items():
+            if isinstance(substates, dict) and path_key != 'global_time':
+                for subkey in substates:
+                    if isinstance(substates[subkey], dict) and len(substates[subkey]) > 10:
+                        self._cell_path = (path_key, subkey)
+                        break
+            if self._cell_path:
+                break
+
+        # Seed mass listener data (must run fresh each time, not baked into pickle)
+        if self._cell_path:
+            _seed_listeners(get_path(self.state, self._cell_path))
+
+        # Add RAMEmitter as a step inside the cell state
+        self._setup_emitter()
+
+    def _setup_emitter(self):
+        """Add a RAMEmitter step inside the cell state, wired to mass listener
+        paths and triggered as the last step in the flow via a flow token."""
+        from process_bigraph.emitter import RAMEmitter
+
+        if not self._cell_path:
+            return
+
+        cell_state = get_path(self.state, self._cell_path)
+
+        # Wires are relative to cell state
+        emit_wires = {
+            'global_time': ['global_time'],
+            'protein_mass': ['listeners', 'mass', 'protein_mass'],
+            'dry_mass': ['listeners', 'mass', 'dry_mass'],
+            'rRna_mass': ['listeners', 'mass', 'rRna_mass'],
+            'tRna_mass': ['listeners', 'mass', 'tRna_mass'],
+            'mRna_mass': ['listeners', 'mass', 'mRna_mass'],
+            'dna_mass': ['listeners', 'mass', 'dna_mass'],
+            'smallMolecule_mass': ['listeners', 'mass', 'smallMolecule_mass'],
+        }
+
+        emit_schema = {port: 'node' for port in emit_wires}
+        emitter = RAMEmitter({'emit': emit_schema}, self.core)
+
+        # Find the last flow token to chain the emitter after all other steps
+        max_token = -1
+        for name, edge in cell_state.items():
+            if not isinstance(edge, dict):
+                continue
+            for wire_name, wire_path in edge.get('outputs', {}).items():
+                if isinstance(wire_path, list) and len(wire_path) == 1 and wire_path[0].startswith('_flow_token_'):
+                    token_num = int(wire_path[0].split('_')[-1])
+                    if token_num > max_token:
+                        max_token = token_num
+        if max_token >= 0:
+            emit_wires['_flow_in'] = [f'_flow_token_{max_token}']
+
+        cell_state['emitter'] = {
+            '_type': 'step',
+            'address': 'local:RAMEmitter',
+            'config': {'emit': emit_schema},
+            'inputs': emit_wires,
+            'outputs': {},
+            'instance': emitter,
+            'priority': 0.0,
+        }
+
+        self.emitter = emitter
+
+        # Rebuild step network to include the emitter
+        self.find_instance_paths(self.state)
+        self.build_step_network()
+
+    def _init_from_migrated(self, config, core):
+        """Initialize from a migrated state that already has process instances.
+        Skips core.realize to preserve the state as-is."""
+        self.core = core
+        self._config = {}
+        self._composition = 'edge'
+        self._state = {}
+
+        self.schema = config.get('schema', {})
+        self.state = config.get('state', {})
+        self.bridge = config.get('bridge', {})
+
+        if 'global_time' not in self.state:
+            self.state['global_time'] = 0.0
+
+        self.front = {}
+        self.find_instance_paths(self.state)
+        self.edge_paths = {**self.process_paths, **self.step_paths}
+
+        self.process_schema = {port: {} for port in ['inputs', 'outputs']}
+        self.global_time_precision = config.get('global_time_precision')
+
+        self.front = {
+            path: empty_front(self.state['global_time'])
+            for path in self.process_paths}
+
+        self.bridge_updates = []
+
+        # Initialize caches expected by newer process-bigraph versions
+        self._view_cache = {}
+        self._project_cache = {}
+        self._fast_view_paths = {}
+        self._fast_project_paths = {}
+        self._compiled_projects = {}
+
+        self.build_step_network()
+        self._reset_process_state()
+
+    def _reset_process_state(self):
+        """Reset internal caches and flags on all process instances.
+
+        Clears _idx caches on both step instances and their nested
+        PartitionedProcess objects so they re-initialize from the
+        current state on first use."""
+        if not self._cell_path:
+            return
+        cell_state = get_path(self.state, self._cell_path)
+        for key, val in cell_state.items():
+            if not isinstance(val, dict) or 'instance' not in val:
+                continue
+            instance = val['instance']
+
+            # Clear caches on the step instance
+            for attr in list(vars(instance).keys()):
+                if attr.endswith('_idx') or attr == 'molecule_idx' or attr == 'bulk_idx':
+                    setattr(instance, attr, None)
+
+            # Clear caches on nested PartitionedProcess
+            if hasattr(instance, 'parameters') and 'process' in instance.parameters:
+                proc = instance.parameters['process']
+                if hasattr(proc, 'request_set'):
+                    proc.request_set = False
+                for attr in list(vars(proc).keys()):
+                    if attr.endswith('_idx') or attr == 'molecule_idx' or attr == 'bulk_idx':
+                        setattr(proc, attr, None)
+
+    def _ensure_unique_updaters(self):
+        """Lazily initialize the shared UniqueNumpyUpdater registry."""
+        if self._unique_updaters is not None:
+            return
+
+        if self._cell_path:
+            cell_state = get_path(self.state, self._cell_path)
+            step_names = [k for k, v in cell_state.items()
+                          if isinstance(v, dict) and 'instance' in v]
+            self._unique_updaters = _share_unique_updaters(cell_state, step_names)
+        else:
+            self._unique_updaters = {}
+
+    def expire_process_paths(self, update_paths):
+        """No-op -- process paths don't change during v1 simulation."""
+        pass
+
+    def apply_updates(self, updates):
+        """Override to skip core.apply/realize which would replace state dicts.
+        Syncs global_time from composite root to cell state."""
+        if self._cell_path:
+            cell_state = get_path(self.state, self._cell_path)
+            cell_state['global_time'] = self.state.get('global_time', 0.0)
+            return [self._cell_path + ('global_time',)]
+        return []
+
+    def run_steps(self, step_paths):
+        """Execute steps using v1 updater semantics with proper path tracking."""
+        if not step_paths:
+            self.steps_run = set()
+            return
+
+        self._ensure_unique_updaters()
+
+        update_paths = []
+        for step_path in step_paths:
+            step = get_path(self.state, step_path)
+            if not isinstance(step, dict) or 'instance' not in step:
+                continue
+
+            instance = step['instance']
+
+            cell_state_path = step_path[:-1]
+            cell_state = get_path(self.state, cell_state_path)
+
+            _make_arrays_writeable(cell_state)
+
+            try:
+                view = _build_view(cell_state, step, instance)
+                if hasattr(instance, 'next_update'):
+                    view = fill_missing_state(view, instance)
+                    timestep = instance.parameters.get('timestep', 1.0)
+                    delta = instance.next_update(timestep, view)
+                else:
+                    delta = instance.update(view)
+
+                if delta:
+                    apply_step_update(cell_state, step, instance, delta,
+                                      unique_updaters=self._unique_updaters)
+
+                output_wires = step.get('outputs', {})
+                for port_name, wire_path in output_wires.items():
+                    if isinstance(wire_path, list) and wire_path:
+                        full_path = tuple(list(cell_state_path) + wire_path)
+                        update_paths.append(full_path)
+                    elif isinstance(wire_path, dict):
+                        base = wire_path.get('_path', [])
+                        if base:
+                            full_path = tuple(list(cell_state_path) + base)
+                            update_paths.append(full_path)
+            except Exception:
+                pass
+
+        self.expire_process_paths(update_paths)
+        to_run = self.cycle_step_state()
+
+        if to_run:
+            self.run_steps(to_run)
+        else:
+            self.steps_run = set()
+
+
+# ---------------------------------------------------------------------------
+# v1 adapter classes
+# ---------------------------------------------------------------------------
+
+class Resolver(BigraphStep):
+    pass
+
+
+class OmniStep(BigraphStep):
+    """Allows v1 steps to run as v2 steps."""
+    config_schema = {}
+    _ports = {"inputs": [], "outputs": []}
+
+    def __init__(self, parameters=None, config=None, core=None):
+        parameters = parameters or config
+        config = config or parameters
+        super().__init__(config=config, core=core)
+
+    def inputs(self):
+        return translate_ports(self.core, self.ports_schema())
+
+    def outputs(self):
+        return translate_ports(self.core, self.ports_schema())
+
+    def initial_state(self, config=None):
+        return {}
+
+    def update(self, state, interval=None):
+        if hasattr(self, 'next_update'):
+            timestep = interval if interval and interval > 0 else self.parameters.get('timestep', 1.0)
+            state = fill_missing_state(state, self)
+            delta = self.next_update(timestep, state)
+            apply_v1_update_in_place(self, state, delta)
+        return {}
+
+
+class OmniProcess(BigraphProcess):
+    """Allows v1 processes to run as v2 processes."""
+    config_schema = {}
+    _ports = {"inputs": [], "outputs": []}
+
+    def __init__(self, parameters=None, config=None, core=None):
+        parameters = parameters or config
+        config = config or parameters
+        super().__init__(config=config, core=core)
+
+    def inputs(self):
+        return translate_ports(self.core, self.ports_schema())
+
+    def outputs(self):
+        return translate_ports(self.core, self.ports_schema())
+
+    def initial_state(self, config=None):
+        return {}
+
+    def calculate_timestep(self, interval_or_state, state=None):
+        """Bridge v1 calculate_timestep(states) to v2 signature(interval, state).
+
+        v1 engine calls calculate_timestep(states) with 1 arg.
+        v2 Composite calls calculate_timestep(interval, state) with 2 args."""
+        if state is None:
+            # Called by v1 engine: interval_or_state is actually 'states'
+            return self.parameters.get('timestep', 1.0)
+        else:
+            # Called by v2 Composite: interval_or_state is 'interval'
+            return interval_or_state
+
+    def update(self, state, interval):
+        state = fill_missing_state(state, self)
+        delta = self.next_update(interval, state)
+        return delta if delta else {}
+
+
+# ---------------------------------------------------------------------------
+# Migration pipeline
+# ---------------------------------------------------------------------------
+
+def update_inheritance(cls, new_base, core):
+    if new_base in cls.__bases__:
+        return
+
+    cls.__bases__ = cls.__bases__ + (new_base,)
+    original_init = cls.__init__
+    captured_core = core
+
+    def new_init(self, config=None, core=None, parameters=None):
+        config = config or parameters
+        parameters = parameters or config
+        if core is None:
+            core = captured_core
+        try:
+            original_init(self, parameters=parameters)
+        except Exception as e:
+            raise RuntimeError(f"Failed to initialize {cls.__name__}: {e}") from e
+        self._config = config or {}
+        new_base.__init__(self, config=config, parameters=parameters, core=core)
+
+    cls.__init__ = new_init
+
+    if not hasattr(cls, '_omni_patched'):
+        cls.initial_state = new_base.initial_state
+        cls.update = new_base.update
+        if hasattr(new_base, 'calculate_timestep'):
+            cls.calculate_timestep = new_base.calculate_timestep
+        cls._omni_patched = True
+
+
+def find_instances(module, visited=None):
+    steps = {}
+    processes = {}
+    visited = visited or set()
+
+    for key in dir(module):
+        value = getattr(module, key)
+        if not isinstance(value, type):
+            if inspect.ismodule(value) and value.__name__.startswith('ecoli') and value not in visited:
+                visited.add(value)
+                substeps, subprocesses = find_instances(value, visited)
+                steps.update(substeps)
+                processes.update(subprocesses)
+            continue
+        if value in (VivariumStep, VivariumProcess):
+            continue
+        if issubclass(value, VivariumStep):
+            steps[key] = value
+        elif issubclass(value, VivariumProcess):
+            processes[key] = value
+
+    return steps, processes
+
+
+def scan_processes(path):
+    module = local_lookup_module(path)
+    steps, processes = find_instances(module)
+    return {'processes': processes, 'steps': steps}
+
+
+def update_processes(core, processes):
+    for process_name, process in processes.get('processes', {}).items():
+        update_inheritance(process, OmniProcess, core)
+        process.core = core
+        core.register_link(process_name, process)
+    for step_name, step in processes.get('steps', {}).items():
+        update_inheritance(step, OmniStep, core)
+        step.core = core
+        core.register_link(step_name, step)
+    return core
+
+
+def scan_update(core, path):
+    processes = scan_processes(path)
+    return update_processes(core, processes)
+
+
+def list_paths(path):
+    if isinstance(path, tuple):
+        return list(path)
+    elif isinstance(path, dict):
+        return {key: list_paths(subpath) for key, subpath in path.items()}
+
+
+def translate_processes(core, tree, topology=None, edge_type=None):
+    if isinstance(tree, BigraphEdge):
+        cls = type(tree)
+        tree.core = core
+        if not hasattr(tree, '_config'):
+            tree._config = tree.parameters
+        if not hasattr(cls, 'config_schema'):
+            cls.config_schema = {}
+
+        if edge_type == 'process':
+            type_name = 'process'
+            state = {'interval': 1.0}
+        else:
+            type_name = 'step'
+            state = {'priority': 1.0}
+
+        if topology is None:
+            topology = tree.topology
+        wires = list_paths(topology)
+
+        state.update({
+            '_type': type_name,
+            'address': f'local:{cls.__name__}',
+            'config': tree.parameters,
+            '_inputs': tree.inputs(),
+            '_outputs': tree.outputs(),
+            'instance': tree,
+            'inputs': copy.deepcopy(wires),
+            'outputs': copy.deepcopy(wires)})
+        return state
+
+    elif isinstance(tree, dict):
+        return {key: translate_processes(core, subtree,
+                    topology[key] if topology else None,
+                    edge_type=edge_type)
+                for key, subtree in tree.items()}
+    else:
+        return tree
+
+
+# ---------------------------------------------------------------------------
+# Initial state seeding
+# ---------------------------------------------------------------------------
+
+SCALAR_STATE_KEYS = {'global_time', 'timestep', 'next_update_time'}
+
+
+LISTENERS_TO_SEED = ['post-division-mass-listener', 'ecoli-mass-listener']
+
+
+def _seed_listeners(cell_state):
+    """Run mass listener steps on cell_state to populate derived values.
+
+    Must be called each time a composite is created so that mass/volume
+    data is available for processes that need it on the first timestep.
+    Does not require the sim object — works directly on cell state."""
+    for step_name in LISTENERS_TO_SEED:
+        edge = cell_state.get(step_name)
+        if not isinstance(edge, dict) or 'instance' not in edge:
+            continue
+        instance = edge['instance']
+        if not hasattr(instance, 'next_update'):
+            continue
+        _ensure_wired_paths(cell_state, edge)
+        _populate_port_defaults(cell_state, edge, instance)
+        try:
+            view = _build_view(cell_state, edge, instance)
+            timestep = instance.parameters.get('timestep', 1.0)
+            update = instance.next_update(timestep, view)
+            _apply_dict_updates(cell_state, edge.get('outputs', {}), update)
+        except Exception:
+            continue
+
+
+def _ensure_wired_paths(cell_state, edge):
+    """Ensure output paths that will receive dict updates exist as empty dicts."""
+    wires = edge.get('outputs', {})
+    for port_name, wire_path in wires.items():
+        if isinstance(wire_path, list) and len(wire_path) == 1:
+            key = wire_path[0]
+            if key in SCALAR_STATE_KEYS:
+                continue
+            if key not in cell_state or cell_state[key] is None:
+                cell_state[key] = {}
+
+
+def _populate_port_defaults(cell_state, edge, instance):
+    """Populate port defaults into the state along wired paths."""
+    try:
+        ports = instance.ports_schema()
+    except Exception:
+        return
+    wires = edge.get('inputs', {})
+    for port_name, wire_path in wires.items():
+        if not isinstance(wire_path, list) or not wire_path:
+            continue
+        port = ports.get(port_name)
+        if not isinstance(port, dict):
+            continue
+        if '_default' in port:
+            target = cell_state
+            for segment in wire_path[:-1]:
+                if isinstance(target, dict):
+                    if segment not in target or target[segment] is None:
+                        target[segment] = {}
+                    target = target[segment]
+                else:
+                    break
+            if isinstance(target, dict):
+                last = wire_path[-1]
+                if last not in target or target[last] is None:
+                    target[last] = port['_default']
+        else:
+            _inject_nested_defaults(cell_state, wire_path, port)
+
+
+def _inject_nested_defaults(state, wire_path, port_schema):
+    """Inject nested port defaults into state at the given wire path."""
+    target = state
+    for segment in wire_path:
+        if isinstance(target, dict):
+            if segment not in target or target[segment] is None:
+                target[segment] = {}
+            target = target[segment]
+        else:
+            return
+    if not isinstance(target, dict):
+        return
+    for key, value in port_schema.items():
+        if key.startswith('_'):
+            continue
+        if isinstance(value, dict):
+            if '_default' in value and key not in target:
+                target[key] = value['_default']
+            elif key not in target:
+                target[key] = {}
+                _inject_nested_defaults(target, [key], value)
+            elif isinstance(target[key], dict):
+                _inject_nested_defaults(target, [key], value)
+
+
+# ---------------------------------------------------------------------------
+# Flow ordering
+# ---------------------------------------------------------------------------
+
+def extract_flow_priorities(flow):
+    """Convert a v1 flow dict into priority values. Earlier steps get higher priority."""
+    order = list(flow.keys())
+    n = len(order)
+    return {step_name: float(n - i) for i, step_name in enumerate(order)}
+
+
+def inject_flow_dependencies(cell_state, flow):
+    """Add synthetic wiring to enforce the v1 flow execution order."""
+    order = list(flow.keys())
+    for i, step_name in enumerate(order):
+        edge = cell_state.get(step_name)
+        if not isinstance(edge, dict):
+            continue
+        if i == 0:
+            edge.setdefault('inputs', {}).setdefault('global_time', ['global_time'])
+        if i > 0:
+            edge.setdefault('inputs', {})[f'_flow_in_{i}'] = [f'_flow_token_{i-1}']
+        if i < len(order) - 1:
+            edge.setdefault('outputs', {})[f'_flow_out_{i}'] = [f'_flow_token_{i}']
+
+
+# ---------------------------------------------------------------------------
+# Top-level migration
+# ---------------------------------------------------------------------------
+
+def migrate_composite(core, sim):
+    processes = translate_processes(core, sim.ecoli.processes, sim.ecoli.topology, edge_type='process')
+    steps = translate_processes(core, sim.ecoli.steps, sim.ecoli.topology, edge_type='step')
+
+    state = deep_merge(processes, steps)
+    state = deep_merge(state, sim.generated_initial_state)
+    flow = sim.ecoli.flow
+    for path_key, substates in state.items():
+        if isinstance(substates, dict):
+            subflow = flow.get(path_key, {})
+            for subkey, subsubstates in substates.items():
+                if isinstance(subsubstates, dict):
+                    inner_flow = subflow.get(subkey, {})
+                    if inner_flow:
+                        priorities = extract_flow_priorities(inner_flow)
+                        for step_name, priority in priorities.items():
+                            if isinstance(subsubstates.get(step_name), dict):
+                                subsubstates[step_name]['priority'] = priority
+                        inject_flow_dependencies(subsubstates, inner_flow)
+
+    return state
+
+
+# ---------------------------------------------------------------------------
+# Public API: generate and load
+# ---------------------------------------------------------------------------
+
+def generate_ecoli_document(outpath='out/ecoli.pickle'):
+    """Build the E. coli composite from EcoliSim and save as a document.
+
+    Also generates a bigraph visualization (.png and .svg) alongside the document.
+
+    Args:
+        outpath: Path for the output file.
+
+    Returns:
+        The path to the saved file.
+    """
+    core = allocate_core()
+    core.register_types(ECOLI_TYPES)
+    core = scan_update(core, 'ecoli.processes')
+
+    with chdir(ROOT_PATH):
+        sim = EcoliSim.from_file(CONFIG_DIR_PATH + "default.json")
+        sim.build_ecoli()
+
+    migrate = migrate_composite(core, sim)
+    inferred = core.infer(migrate)
+
+    document = {'schema': inferred, 'state': migrate}
+
+    os.makedirs(os.path.dirname(outpath) or '.', exist_ok=True)
+    with open(outpath, 'wb') as f:
+        dill.dump(document, f)
+
+    print(f"Saved E. coli document to {outpath}")
+
+    plot_ecoli_bigraph(document, outpath)
+    plot_ecoli_bigraph(document, outpath, show_partitioning=True)
+
+    return outpath
+
+
+def load_ecoli_composite(path='out/ecoli.pickle', core=None):
+    """Load an E. coli composite from a saved document and return it ready to run.
+
+    Args:
+        path: Path to the document produced by generate_ecoli_document.
+        core: Pre-configured bigraph-schema core. If None, creates one.
+
+    Returns:
+        An EcoliComposite ready for .run(interval).
+    """
+    if core is None:
+        core = allocate_core()
+        core.register_types(ECOLI_TYPES)
+        core = scan_update(core, 'ecoli.processes')
+
+    with open(path, 'rb') as f:
+        document = dill.load(f)
+
+    return EcoliComposite(document, core=core)

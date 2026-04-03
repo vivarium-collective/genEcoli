@@ -1,2 +1,27 @@
-.python-version
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
 uv.lock
+
+# Devenv
+.devenv*
+devenv.local.nix
+devenv.lock
+
+# direnv
+.direnv
+
+# pre-commit
+.pre-commit-config.yaml
+
+# vEcoli
+reconstruction/
+.python-version
+out/

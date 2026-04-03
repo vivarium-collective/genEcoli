@@ -5,12 +5,20 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = "==3.12.9"
 dependencies = [
-    "bigraph-schema",
-    "process-bigraph",
-    "vecoli",
+    "bigraph-schema>=0.0.60",
+    "process-bigraph>=0.0.38",
+    "vEcoli[dev]>=1.1.0",
+    "vivarium-core>=1.6.5",
+    "plum-dispatch>=2.5",
+    "dill>=0.3"
+]
+
+[tool.setuptools]
+packages = [
+    "genEcoli"
 ]
 
 [tool.uv.sources]
-vecoli = { path = "../vEcoli" }
-process-bigraph = { path = "../process-bigraph" }
-bigraph-schema = { path = "../bigraph-schema" }
+vecoli = { path = "../vEcoli", editable = true }
+process-bigraph = { path = "../process-bigraph", editable = true }
+bigraph-schema = { path = "../bigraph-schema", editable = true }
